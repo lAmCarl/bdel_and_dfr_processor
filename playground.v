@@ -1,12 +1,19 @@
-module processor();
-	// TODO: load program end
-	wire [15:0] pc, sp, program_end;
-	wire read_instruction_start, read_instruction_done;
+module processor(output [17:0] LEDR);
+	reg [15:0] pc = 0; sp = 0;
+	reg read_instruction_start = 0, read_instruction_done = 0;
 	wire clock, reset_n;
+	wire reg idle = 1;
+	wire nike;
+	assign nike = ~KEY[1];
 	
 	wire [63:0] instruction;
 	wire [15:0] opcode, instr_a, instr_b, instr_c;
 	assign { opcode, instr_a, instr_b, instr_c } = instruction;
+
+	wire program_running, program_done, program_error;
+	assign program_running = LEDG[0];
+	assign program_done = LEDG[1];
+	assign program_error = LEDR[17];
 
 	parameter OP_LOAD = 16'd1
 		, OP_STORE = 16'd2
@@ -24,14 +31,26 @@ module processor();
 		, OP_NSTACK = 16'd14
 		, OP_SUPERMANDIVE = 16'd15
 		, OP_GETUP = 16'd16
-		, OP_PRINT = 16'd17;
+		, OP_PRINT = 16'd17
+		, OP_EOF = 16'd0
+
+	// Output LED
+	// Use:led_output_in, led_output_write_enable
+	wire [15:0] led_output_in;
+	reg led_output_write_enable = 0;
+	led_output_dffr(clock, led_output_write_enable, reset_n, led_output_in, LEDR[15:0]);
+
+	// Input fpga
+	wire [15:0] input_fpga_out;
+	wire input_fpga_returned;
+	assign input_fpga_out = SW[15:0];
+	assign input_fpga_returned = ~KEY[2];
 
 	// Registers (search for "label: CPU registers")
-	// Use: cpu_registers_<read|write> <a|b|c>
+	// Use: cpu_registers_<read|write> <a|b|c>, cpu_registers_write_enable
 	wire [255:0] cpu_registers_in, cpu_registers_out;
-	cpu_registers_dffr(clock, reset_n, cpu_registers_in, cpu_registers_out);
-
-	// load 10 4;
+	reg cpu_registers_write_enable = 0;
+	cpu_registers_dffr(clock, cpu_registers_write_enable, reset_n, cpu_registers_in, cpu_registers_out);
 
 	wire [15:0] cpu_registers_read_a, cpu_registers_read_b, cpu_registers_read_c;
 	cpu_registers_read_mux(instr_a, cpu_registers_out, cpu_registers_read_a);
@@ -47,29 +66,49 @@ module processor();
 	// Use: stack_address, stack_bytes, stack_read, stack_write
 	wire [255:0] stack_read, stack_write;
 	wire [15:0] stack_address, stack_bytes;
-	wire stack_read_start, stack_read_done, stack_write_start, stack_write_done;
+	reg stack_read_start = 0, stack_read_done = 0, stack_write_start = 0, stack_write_done = 0;
 	ram_read(clock, stack_read_start, stack_address, stack_bytes, stack_read, stack_read_done);
 	ram_write(clock, stack_write_start, stack_address, stack_bytes, stack_write, stack_write_done);
 
 	// Read instruction
 	ram_read(clock, read_instruction_start, pc, 16'd64, { instruction, 192{ 1'bz } }, read_instruction_done);
 
-	// TODO: how to set initial state?
-	// TODO: reset
 	always@(posedge clock) begin
-		if (read_instruction_start) begin // read instruction state
-			if (read_instruction_done) begin
-				read_instruction_start <= 0;
-			end
-		end else begin // operate state
-			if (pc == program_end) begin // done state
-				// TODO: set an LED?
-			else
+		cpu_registers_write_enable = 0;
+		led_output_write_enable = 0;
+		program_running = 1;
+		program_done = 0;
+		program_error = 0;
+		if (!reset_n) begin
+			idle <= 1;
+			pc <= 0;
+			sp <= 0;
+			read_instruction_start <= 0;
+			read_instruction_done <= 0;
+			stack_read_start <= 0;
+			stack_read_done <= 0;
+			stack_write_start <= 0;
+			stack_write_done <= 0;
+			cpu_registers_write_enable <= 0;
+			led_output_write_enable <= 0;
+		end else begin
+			if (idle) begin
+				program_running = 0;
+				if (nike) begin
+					idle <= 0;
+					read_instruction_start <= 1;
+				end
+			end else if (read_instruction_start) begin // read instruction state
+				if (read_instruction_done) begin
+					read_instruction_start <= 0;
+				end
+			end else begin // operate state
 				case (opcode)
 					OP_LOAD: begin // load 8 0
 						if (stack_read_start) begin
 							if (stack_read_done) begin
 								cpu_registers_write_b <= stack_read[255:240];
+								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
 								pc <= pc + 16;
 								read_instruction_start <= 1;
@@ -100,25 +139,32 @@ module processor();
 						read_instruction_start <= 1;
 					end
 					OP_OUTPUT: begin
-						// TODO
+						led_output_in <= cpu_registers_read_a;
+						led_output_write_enable = 1;
+						pc <= pc + 16;
+						read_instruction_start <= 1;
 					end
 					OP_ADD: begin
 						cpu_registers_write_c <= cpu_registers_read_a + cpu_registers_read_b;
+						cpu_registers_write_enable = 1;
 						pc <= pc + 16;
 						read_instruction_start <= 1;
 					end
 					OP_SUB: begin
 						cpu_registers_write_c <= cpu_registers_read_a - cpu_registers_read_b;
+						cpu_registers_write_enable = 1;
 						pc <= pc + 16;
 						read_instruction_start <= 1;
 					end
 					OP_MUL: begin
 						cpu_registers_write_c <= cpu_registers_read_a * cpu_registers_read_b;
+						cpu_registers_write_enable = 1;
 						pc <= pc + 16;
 						read_instruction_start <= 1;
 					end
 					OP_DIV: begin
 						cpu_registers_write_c <= cpu_registers_read_a / cpu_registers_read_b;
+						cpu_registers_write_enable = 1;
 						pc <= pc + 16;
 						read_instruction_start <= 1;
 					end
@@ -140,7 +186,13 @@ module processor();
 						read_instruction_start <= 1;
 					end
 					OP_INPUT: begin
-						// TODO
+						// TODO: consecutive inputs
+						if (input_fpga_returned) begin
+							cpu_registers_write_a <= input_fpga_out;
+							cpu_registers_write_enable = 1;
+							pc <= pc + 16;
+							read_instruction_start <= 1;
+						end
 					end
 					OP_STACK: begin
 						sp <= sp + instr_a;
@@ -171,6 +223,7 @@ module processor();
 						if (stack_read_start) begin
 							if (stack_read_done) begin
 								cpu_registers_in <= stack_read;
+								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
 								pc <= pc + 16;
 								sp <= sp - 256
@@ -185,13 +238,28 @@ module processor();
 					OP_PRINT: begin
 						// TODO
 					end
+					OP_EOF: begin
+						program_done = 1;
+						program_running = 0;
+					end
 					default: begin
-						// TODO: quit program, go to error state
+						program_error = 1;
+						program_running = 0;
 					end
 				endcase
 			end
 		end
 	end
+endmodule
+
+//label: LED output
+module led_output_dffr(input clock, enable, reset_n, input [15:0] d, output reg [15:0] q);
+	always@(posedge clock) begin
+		if (!reset_n) begin
+			q <= 0;
+		end else if (enable) begin
+			q <= d;
+		end
 endmodule
 
 // label: RAM
@@ -222,11 +290,11 @@ module ram_write(input clock, start, input [15:0] address, bytes, input [255:0] 
 endmodule
 
 // label: CPU registers
-module cpu_registers_dffr(input clock, input reset_n, input [255:0] d, output reg [255:0] q);
+module cpu_registers_dffr(input clock, enable, reset_n, input [255:0] d, output reg [255:0] q);
 	always@(posedge clock, negedge reset_n) begin
 		if (!reset_n) begin
 			q <= 0;
-		end else begin
+		end else if (enable) begin
 			q <= d;
 		end
 	end
