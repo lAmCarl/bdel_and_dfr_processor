@@ -123,7 +123,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 					OP_LOAD: begin
 						if (stack_read_start) begin
 							if (stack_read_done) begin
-								cpu_registers_write <= { stack_read[255:240], { 240{ 1'bx } } };
+								cpu_registers_write <= { stack_read[255:240], 240'bx };
 								cpu_registers_write_index <= instr_b;
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
@@ -151,7 +151,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						end
 					end
 					OP_LITERAL: begin
-						cpu_registers_write <= { instr_a, { 240{ 1'bx } } };
+						cpu_registers_write <= { instr_a, 240'bx };
 						cpu_registers_write_index <= instr_b;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
@@ -164,28 +164,28 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						read_instruction_start <= 1;
 					end
 					OP_ADD: begin
-						cpu_registers_write <= { cpu_registers_read_a + cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write <= { cpu_registers_read_a + cpu_registers_read_b, 240'bx };
 						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
 					OP_SUB: begin
-						cpu_registers_write <= { cpu_registers_read_a - cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write <= { cpu_registers_read_a - cpu_registers_read_b, 240'bx };
 						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
 					OP_MUL: begin
-						cpu_registers_write <= { cpu_registers_read_a * cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write <= { cpu_registers_read_a * cpu_registers_read_b, 240'bx };
 						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
 					OP_DIV: begin
-						cpu_registers_write <= { cpu_registers_read_a / cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write <= { cpu_registers_read_a / cpu_registers_read_b, 240'bx };
 						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
@@ -212,7 +212,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						// TODO: consecutive inputs
 						input_fpga_waiting = 1;
 						if (input_fpga_returned) begin
-							cpu_registers_write <= { input_fpga_out, { 240{ 1'bx } } };
+							cpu_registers_write <= { input_fpga_out, 240'bx };
 							cpu_registers_write_index <= instr_a;
 							cpu_registers_write_enable = 1;
 							pc <= pc + 16'd16;
@@ -296,7 +296,23 @@ module ram_read(input clock, start, input [15:0] hmmm, address, bytes, output re
 		if (start) begin
 			// output to q
 			// set done to high when finished
-			q <= { 16{ hmmm } };
+			case (address)
+				16'd0: begin
+					q <= { 16'd12, 16'd0, 16'dx, 16'dx, 192'bx };
+				end
+				16'd16: begin
+					q <= { 16'd3, 16'd3, 16'd1, 16'dx, 192'bx };
+				end
+				16'd32: begin
+					q <= { 16'd5, 16'd0, 16'd1, 16'd2, 192'bx };
+				end
+				16'd48: begin
+					q <= { 16'd4, 16'd2, 16'dx, 16'dx, 192'bx };
+				end
+				16'd64: begin
+					q <= { 16'd0, 16'dx, 16'dx, 16'dx, 192'bx };
+				end
+			endcase
 			done <= 1;
 		end else begin
 			// reset to ready/starting state
