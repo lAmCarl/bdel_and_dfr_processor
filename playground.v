@@ -1,4 +1,4 @@
-module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0] LEDG, output [17:0] LEDR);
+module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0] LEDG, output [17:0] LEDR);
 	assign LEDG[6:2] = { 5{ 1'd0 }};
 	assign LEDR[16] = 0;
 
@@ -57,21 +57,20 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 	assign LEDG[7] = input_fpga_waiting;
 
 	// Registers (search for "label: CPU registers")
-	// Use: cpu_registers_<read|write> <a|b|c>, cpu_registers_write_enable
+	// Use: cpu_registers_<read> <a|b|c>, cpu_registers_write, cpu_registers_write_enable, cpu_registers_write_index
 	wire [255:0] cpu_registers_in;
 	wire [255:0] cpu_registers_out;
 	reg cpu_registers_write_enable = 0;
+	reg [15:0] cpu_registers_write_index = 0;
 	cpu_registers_dffr u1(clock, cpu_registers_write_enable, reset_n, cpu_registers_in, cpu_registers_out);
 
 	wire [15:0] cpu_registers_read_a, cpu_registers_read_b, cpu_registers_read_c;
 	cpu_registers_read_mux u2(instr_a, cpu_registers_out, cpu_registers_read_a);
 	cpu_registers_read_mux u3(instr_b, cpu_registers_out, cpu_registers_read_b);
 	cpu_registers_read_mux u4(instr_c, cpu_registers_out, cpu_registers_read_c);
-
-	reg [15:0] cpu_registers_write_a = 0, cpu_registers_write_b = 0, cpu_registers_write_c = 0;
-	cpu_registers_write_mux u5(clock, instr_a, cpu_registers_write_a, cpu_registers_in);
-	cpu_registers_write_mux u6(clock, instr_b, cpu_registers_write_b, cpu_registers_in);
-	cpu_registers_write_mux u7(clock, instr_c, cpu_registers_write_c, cpu_registers_in);
+	
+	reg [255:0] cpu_registers_write = 0;
+	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index, cpu_registers_write, cpu_registers_in);
 	
 	// Stack
 	// Use: stack_address, stack_bytes, stack_read, stack_write
@@ -85,7 +84,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 
 	// Read instruction
 	wire [255:0] instruction_padded;
-	assign instruction = instruction_padded[255:240];
+	assign instruction = instruction_padded[255:192];
 	ram_read u10(clock, read_instruction_start, SW[15:0], pc, 16'd64, instruction_padded, read_instruction_done);
 
 	always@(posedge clock) begin
@@ -106,14 +105,10 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 			stack_address <= 0;
 			stack_bytes <= 0;
 			stack_write <= 0;
-			//cpu_registers_in <= 0;
-			cpu_registers_write_a <= 0;
-			cpu_registers_write_b <= 0;
-			cpu_registers_write_c <= 0;
-			cpu_registers_write_enable <= 0;
-			led_output_write_enable <= 0;
+			cpu_registers_write <= 0;
+			cpu_registers_write_index <= 0;
 		end else begin
-			if (idle) begin
+			if (idle) begin // idle state
 				program_running = 0;
 				if (nike) begin
 					idle <= 0;
@@ -125,10 +120,11 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 				end
 			end else begin // operate state
 				case (opcode)
-					OP_LOAD: begin // load 8 0
+					OP_LOAD: begin
 						if (stack_read_start) begin
 							if (stack_read_done) begin
-								cpu_registers_write_b <= stack_read[255:240];
+								cpu_registers_write <= { stack_read[255:240], { 240{ 1'bx } } };
+								cpu_registers_write_index <= instr_b;
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
 								pc <= pc + 16'd16;
@@ -154,8 +150,10 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 							stack_write_start <= 1;
 						end
 					end
-					OP_LITERAL: begin // literal 12 0
-						cpu_registers_write_b <= instr_a;
+					OP_LITERAL: begin
+						cpu_registers_write <= { instr_a, { 240{ 1'bx } } };
+						cpu_registers_write_index <= instr_b;
+						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
@@ -166,25 +164,29 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 						read_instruction_start <= 1;
 					end
 					OP_ADD: begin
-						cpu_registers_write_c <= cpu_registers_read_a + cpu_registers_read_b;
+						cpu_registers_write <= { cpu_registers_read_a + cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
 					OP_SUB: begin
-						cpu_registers_write_c <= cpu_registers_read_a - cpu_registers_read_b;
+						cpu_registers_write <= { cpu_registers_read_a - cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
 					OP_MUL: begin
-						cpu_registers_write_c <= cpu_registers_read_a * cpu_registers_read_b;
+						cpu_registers_write <= { cpu_registers_read_a * cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
 					end
 					OP_DIV: begin
-						cpu_registers_write_c <= cpu_registers_read_a / cpu_registers_read_b;
+						cpu_registers_write <= { cpu_registers_read_a / cpu_registers_read_b, { 240{ 1'bx } } };
+						cpu_registers_write_index <= instr_c;
 						cpu_registers_write_enable = 1;
 						pc <= pc + 16'd16;
 						read_instruction_start <= 1;
@@ -208,9 +210,10 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 					end
 					OP_INPUT: begin
 						// TODO: consecutive inputs
-						input_fpga_waiting = 0;
+						input_fpga_waiting = 1;
 						if (input_fpga_returned) begin
-							cpu_registers_write_a <= input_fpga_out;
+							cpu_registers_write <= { input_fpga_out, { 240{ 1'bx } } };
+							cpu_registers_write_index <= instr_a;
 							cpu_registers_write_enable = 1;
 							pc <= pc + 16'd16;
 							read_instruction_start <= 1;
@@ -244,7 +247,8 @@ module playground(input CLOCK_50, input [2:0] KEY, input [17:0] SW, output [7:0]
 					OP_GETUP: begin
 						if (stack_read_start) begin
 							if (stack_read_done) begin
-								//cpu_registers_in <= stack_read;
+								cpu_registers_write <= stack_read;
+								cpu_registers_write_index <= 16'd32;
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
 								pc <= pc + 16'd16;
@@ -350,26 +354,29 @@ module cpu_registers_read_mux(input [15:0] s, input [255:0] cpu_registers, outpu
 	end
 endmodule
 
-module cpu_registers_write_mux(input clock, input [15:0] s, input [15:0] in, output reg [255:0] cpu_registers);
+module cpu_registers_write_mux(input clock, enable, input [15:0] s, input [255:0] in, output reg [255:0] cpu_registers);
 	always@(posedge clock) begin
-		case (s)
-			16'd0: cpu_registers[255:240] = in;
-			16'd1: cpu_registers[239:224] = in;
-			16'd2: cpu_registers[223:208] = in;
-			16'd3: cpu_registers[207:192] = in;
-			16'd4: cpu_registers[191:176] = in;
-			16'd5: cpu_registers[175:160] = in;
-			16'd6: cpu_registers[159:144] = in;
-			16'd7: cpu_registers[143:128] = in;
-			16'd8: cpu_registers[127:112] = in;
-			16'd9: cpu_registers[111:96] = in;
-			16'd10: cpu_registers[95:80] = in;
-			16'd11: cpu_registers[79:64] = in;
-			16'd12: cpu_registers[63:48] = in;
-			16'd13: cpu_registers[47:32] = in;
-			16'd14: cpu_registers[31:16] = in;
-			16'd15: cpu_registers[15:0] = in;
-			default: cpu_registers[255:240] = in;
-		endcase
+		if (enable) begin
+			case (s)
+				16'd0: cpu_registers[255:240] <= in[255:240];
+				16'd1: cpu_registers[239:224] <= in[255:240];
+				16'd2: cpu_registers[223:208] <= in[255:240];
+				16'd3: cpu_registers[207:192] <= in[255:240];
+				16'd4: cpu_registers[191:176] <= in[255:240];
+				16'd5: cpu_registers[175:160] <= in[255:240];
+				16'd6: cpu_registers[159:144] <= in[255:240];
+				16'd7: cpu_registers[143:128] <= in[255:240];
+				16'd8: cpu_registers[127:112] <= in[255:240];
+				16'd9: cpu_registers[111:96] <= in[255:240];
+				16'd10: cpu_registers[95:80] <= in[255:240];
+				16'd11: cpu_registers[79:64] <= in[255:240];
+				16'd12: cpu_registers[63:48] <= in[255:240];
+				16'd13: cpu_registers[47:32] <= in[255:240];
+				16'd14: cpu_registers[31:16] <= in[255:240];
+				16'd15: cpu_registers[15:0] <= in[255:240];
+				16'd32: cpu_registers <= in;
+				default: cpu_registers[255:240] <= in[255:240];
+			endcase
+		end
 	end
 endmodule
