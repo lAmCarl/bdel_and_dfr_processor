@@ -1,6 +1,7 @@
 module processor();
+	// TODO: load program end
 	wire [15:0] pc, sp, program_end;
-	wire read_instruction_start, read_instruction_end;
+	wire read_instruction_start, read_instruction_done;
 	wire clock, reset_n;
 	
 	wire [63:0] instruction;
@@ -30,6 +31,8 @@ module processor();
 	wire [255:0] cpu_registers_in, cpu_registers_out;
 	cpu_registers_dffr(clock, reset_n, cpu_registers_in, cpu_registers_out);
 
+	// load 10 4;
+
 	wire [15:0] cpu_registers_read_a, cpu_registers_read_b, cpu_registers_read_c;
 	cpu_registers_read_mux(instr_a, cpu_registers_out, cpu_registers_read_a);
 	cpu_registers_read_mux(instr_b, cpu_registers_out, cpu_registers_read_b);
@@ -49,21 +52,21 @@ module processor();
 	ram_write(clock, stack_write_start, stack_address, stack_bytes, stack_write, stack_write_done);
 
 	// Read instruction
-	ram_read(clock, read_instruction_start, pc, 16'd64, instruction, { read_instruction_done, 192{ 1'bz } });
+	ram_read(clock, read_instruction_start, pc, 16'd64, { instruction, 192{ 1'bz } }, read_instruction_done);
 
 	// TODO: how to set initial state?
 	// TODO: reset
 	always@(posedge clock) begin
 		if (read_instruction_start) begin // read instruction state
 			if (read_instruction_done) begin
-				ram_read_start <= 0;
+				read_instruction_start <= 0;
 			end
 		end else begin // operate state
 			if (pc == program_end) begin // done state
 				// TODO: set an LED?
 			else
 				case (opcode)
-					OP_LOAD: begin
+					OP_LOAD: begin // load 8 0
 						if (stack_read_start) begin
 							if (stack_read_done) begin
 								cpu_registers_write_b <= stack_read[255:240];
@@ -73,7 +76,7 @@ module processor();
 							end
 						end else begin
 							stack_address <= sp - instr_a;
-							stack_bytes <= 16'd16;
+							stack_bytes <= 16'd1;
 							stack_read_start <= 1;
 						end
 					end
@@ -87,11 +90,11 @@ module processor();
 						end else begin
 							stack_write[255:240] <= cpu_registers_read_a;
 							stack_address <= sp - instr_b;
-							stack_bytes <= 16'd16;
+							stack_bytes <= 16'd1;
 							stack_write_start <= 1;
 						end
 					end
-					OP_LITERAL: begin
+					OP_LITERAL: begin // literal 12 0
 						cpu_registers_write_b <= instr_a;
 						pc <= pc + 16;
 						read_instruction_start <= 1;
@@ -119,7 +122,7 @@ module processor();
 						pc <= pc + 16;
 						read_instruction_start <= 1;
 					end
-					OP_BRANCH: begin
+					OP_BRANCH: begin // branch 0
 						if (cpu_registers_read_a == 0) begin
 							pc <= pc + 16;
 							read_instruction_start <= 1;
@@ -160,7 +163,7 @@ module processor();
 						end else begin
 							stack_write <= cpu_registers_out;
 							stack_address <= sp;
-							stack_bytes <= 16'd255;
+							stack_bytes <= 16'32;
 							stack_write_start <= 1;
 						end
 					end
@@ -175,7 +178,7 @@ module processor();
 							end
 						end else begin
 							stack_address <= sp - 256;
-							stack_bytes <= 16'd16;
+							stack_bytes <= 16'32;
 							stack_read_start <= 1;
 						end
 					end
@@ -230,9 +233,45 @@ module cpu_registers_dffr(input clock, input reset_n, input [255:0] d, output re
 endmodule
 
 module cpu_registers_read_mux(input [15:0] s, input [255:0] cpu_registers, output [15:0] out);
-	// hmmmmm
+	case (s)
+		16'd0: assign out = cpu_registers[255:240];
+		16'd1: assign out = cpu_registers[239:224];
+		16'd2: assign out = cpu_registers[223:208];
+		16'd3: assign out = cpu_registers[207:192];
+		16'd4: assign out = cpu_registers[191:176];
+		16'd5: assign out = cpu_registers[175:160];
+		16'd6: assign out = cpu_registers[159:144];
+		16'd7: assign out = cpu_registers[143:128];
+		16'd8: assign out = cpu_registers[127:112];
+		16'd9: assign out = cpu_registers[111:96];
+		16'd10: assign out = cpu_registers[95:80];
+		16'd11: assign out = cpu_registers[79:64];
+		16'd12: assign out = cpu_registers[63:48];
+		16'd13: assign out = cpu_registers[47:32];
+		16'd14: assign out = cpu_registers[31:16];
+		16'd15: assign out = cpu_registers[15:0];
+		default: assign out = cpu_registers[255:240];
+	endcase
 endmodule
 
 module cpu_registers_write_mux(input [15:0] s, input [15:0] in, output [255:0] cpu_registers);
-	// hmmmmm
+	case (s)
+		16'd0: assign cpu_registers[255:240] = in;
+		16'd1: assign cpu_registers[239:224] = in;
+		16'd2: assign cpu_registers[223:208] = in;
+		16'd3: assign cpu_registers[207:192] = in;
+		16'd4: assign cpu_registers[191:176] = in;
+		16'd5: assign cpu_registers[175:160] = in;
+		16'd6: assign cpu_registers[159:144] = in;
+		16'd7: assign cpu_registers[143:128] = in;
+		16'd8: assign cpu_registers[127:112] = in;
+		16'd9: assign cpu_registers[111:96] = in;
+		16'd10: assign cpu_registers[95:80] = in;
+		16'd11: assign cpu_registers[79:64] = in;
+		16'd12: assign cpu_registers[63:48] = in;
+		16'd13: assign cpu_registers[47:32] = in;
+		16'd14: assign cpu_registers[31:16] = in;
+		16'd15: assign cpu_registers[15:0] = in;
+		default: assign cpu_registers[255:240] = in;
+	endcase
 endmodule
