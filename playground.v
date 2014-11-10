@@ -56,20 +56,18 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	assign input_fpga_returned = ~KEY[2];
 	assign LEDG[2] = input_fpga_waiting;
 
-	// Registers (search for "label: CPU registers")
-	// Use: cpu_registers_<read> <a|b|c>, cpu_registers_write, cpu_registers_write_enable, cpu_registers_write_index
-	wire [255:0] cpu_registers_in;
-	wire [255:0] cpu_registers_out;
+	// CPU registers
+	// Use: cpu_registers_<read>_<a|b|c>, cpu_registers_write, cpu_registers_write_enable, cpu_registers_write_index
+	wire [255:0] cpu_registers;
 	reg cpu_registers_write_enable;
 	reg [15:0] cpu_registers_write_index;
-	cpu_registers_dffr u1(clock, reset_n, cpu_registers_in, cpu_registers_out);
 
 	wire [15:0] cpu_registers_read_a, cpu_registers_read_b;
-	cpu_registers_read_mux u2(instr_a, cpu_registers_out, cpu_registers_read_a);
-	cpu_registers_read_mux u3(instr_b, cpu_registers_out, cpu_registers_read_b);
+	cpu_registers_read_mux u2(instr_a, cpu_registers, cpu_registers_read_a);
+	cpu_registers_read_mux u3(instr_b, cpu_registers, cpu_registers_read_b);
 	
 	reg [255:0] cpu_registers_write;
-	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index, cpu_registers_write, cpu_registers_in);
+	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index, cpu_registers_write, cpu_registers);
 	
 	// Stack
 	// Use: stack_address, stack_bytes, stack_read, stack_write
@@ -243,7 +241,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 								read_instruction_start <= 1;
 							end
 						end else begin
-							stack_write <= cpu_registers_out;
+							stack_write <= cpu_registers;
 							stack_address <= sp;
 							stack_bytes <= 16'd32;
 							stack_write_start <= 1;
@@ -299,26 +297,28 @@ module ram_read(input clock, start, input [15:0] hmmm, address, bytes, output re
 	// TODO: state machine reading number of bytes
 	always@(posedge clock) begin
 		if (start) begin
-			// output to q
-			// set done to high when finished
-			case (address)
-				16'd0: begin
-					q <= { 16'd12, 16'd0, 16'dx, 16'dx, 192'bx };
-				end
-				16'd16: begin
-					q <= { 16'd3, 16'd3, 16'd1, 16'dx, 192'bx };
-				end
-				16'd32: begin
-					q <= { 16'd5, 16'd0, 16'd1, 16'd2, 192'bx };
-				end
-				16'd48: begin
-					q <= { 16'd4, 16'd2, 16'dx, 16'dx, 192'bx };
-				end
-				16'd64: begin
-					q <= { 16'd0, 16'dx, 16'dx, 16'dx, 192'bx };
-				end
-			endcase
-			done <= 1;
+			if (!done) begin
+				// output to q
+				// set done to high when finished
+				case (address)
+					16'd0: begin
+						q <= { 16'd12, 16'd0, 16'dx, 16'dx, 192'bx };
+					end
+					16'd16: begin
+						q <= { 16'd3, 16'd3, 16'd1, 16'dx, 192'bx };
+					end
+					16'd32: begin
+						q <= { 16'd5, 16'd0, 16'd1, 16'd2, 192'bx };
+					end
+					16'd48: begin
+						q <= { 16'd4, 16'd2, 16'dx, 16'dx, 192'bx };
+					end
+					16'd64: begin
+						q <= { 16'd0, 16'dx, 16'dx, 16'dx, 192'bx };
+					end
+				endcase
+				done <= 1;
+			end
 		end else begin
 			// reset to ready/starting state
 			done <= 0;
@@ -330,23 +330,14 @@ module ram_write(input clock, start, input [15:0] address, bytes, input [255:0] 
 	// TODO: state machine write number of bytes
 	always@(posedge clock) begin
 		if (start) begin
-			// write from data
-			// set done to high when finished
-			done <= 1;
+			if (!done) begin
+				// write from data
+				// set done to high when finished
+				done <= 1;
+			end
 		end else begin
 			// reset to ready/starting state
 			done <= 0;
-		end
-	end
-endmodule
-
-// label: CPU registers
-module cpu_registers_dffr(input clock, reset_n, input [255:0] d, output reg [255:0] q);
-	always@(posedge clock, negedge reset_n) begin
-		if (!reset_n) begin
-			q <= 0;
-		end else begin
-			q <= d;
 		end
 	end
 endmodule
