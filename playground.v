@@ -23,7 +23,8 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	assign LEDG[1] = program_done;
 	assign LEDR[17] = program_error;
 
-	parameter OP_LOAD = 16'd1
+	parameter 
+		  OP_LOAD = 16'd1
 		, OP_STORE = 16'd2
 		, OP_LITERAL = 16'd3
 		, OP_OUTPUT = 16'd4
@@ -70,20 +71,37 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index, cpu_registers_write, cpu_registers);
 	
 	// Stack
-	// Use: stack_address, stack_bytes, stack_read, stack_write
+	// Use: stack_address, stack_words, stack_read, stack_write
 	wire [255:0] stack_read;
 	reg [255:0] stack_write = 0;
-	reg [15:0] stack_address = 0, stack_bytes = 0;
+	reg [15:0] stack_address = 0, stack_words = 0;
 	reg stack_read_start = 0, stack_write_start = 0;
+	wire [15:0] stack_write_values, stack_read_values, read_address, write_address, stack_address_real;
 	wire stack_read_done, stack_write_done;
-	ram_read u8(clock, stack_read_start, SW[15:0], stack_address, stack_bytes, stack_read, stack_read_done);
-	ram_write u9(clock, stack_write_start, stack_address, stack_bytes, stack_write, stack_write_done);
+	stack_ram_read u8(clock, stack_read_start, stack_read_values, stack_address, stack_words, stack_read, write_address, stack_read_done);
+	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, read_address, stack_write_done);
+	
+	assign stack_address_real = (stack_read_start == 0)? write_address : read_address;
+	
+	stack_ram u11(
+			.address(stack_address_real),
+			.clock(clock),
+			.data(stack_write_values),
+			.wren((stack_write_start && !stack_write_done)),
+			.q(stack_read_values));
 
 	// Read instruction
 	wire [255:0] instruction_padded;
-	assign instruction = instruction_padded[255:192];
-	ram_read u10(clock, read_instruction_start, SW[15:0], pc, 16'd64, instruction_padded, read_instruction_done);
+	wire [63:0] instr_read_values;
+	instruction_ram_read u10(clock, read_instruction_start, instr_read_values, instruction, read_instruction_done);
 
+	instruction_ram u12(
+			.address(pc),
+			.clock(clock),
+			.data(16'bx),
+			.wren(1'b0),
+			.q(instr_read_values));
+	
 	wire [15:0] do_math_add, do_math_sub, do_math_mul, do_math_div;
 	assign do_math_add = cpu_registers_read_a + cpu_registers_read_b;
 	assign do_math_sub = cpu_registers_read_a - cpu_registers_read_b;
@@ -108,7 +126,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 			stack_read_start <= 0;
 			stack_write_start <= 0;
 			stack_address <= 0;
-			stack_bytes <= 0;
+			stack_words <= 0;
 			stack_write <= 0;
 		end else begin
 			if (idle) begin // idle state
@@ -130,12 +148,12 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 								cpu_registers_write_index = instr_b;
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
-								pc <= pc + 16'd16;
+								pc <= pc + 16'd1;
 								read_instruction_start <= 1;
 							end
 						end else begin
 							stack_address <= sp - instr_a;
-							stack_bytes <= 16'd1;
+							stack_words <= 16'd1;
 							stack_read_start <= 1;
 						end
 					end
@@ -143,13 +161,13 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						if (stack_write_start) begin
 							if (stack_write_done) begin
 								stack_write_start <= 0;
-								pc <= pc + 16'd16;
+								pc <= pc + 16'd1;
 								read_instruction_start <= 1;
 							end
 						end else begin
 							stack_write[255:240] <= cpu_registers_read_a;
 							stack_address <= sp - instr_b;
-							stack_bytes <= 16'd1;
+							stack_words <= 16'd1;
 							stack_write_start <= 1;
 						end
 					end
@@ -157,49 +175,49 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						cpu_registers_write = { instr_a, 240'bx };
 						cpu_registers_write_index = instr_b;
 						cpu_registers_write_enable = 1;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_OUTPUT: begin
 						led_output_in <= cpu_registers_read_a;
 						led_output_write_enable = 1;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_ADD: begin
 						cpu_registers_write = { do_math_add, 240'bx };
 						cpu_registers_write_index = instr_c;
 						cpu_registers_write_enable = 1;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_SUB: begin
 						cpu_registers_write = { do_math_sub, 240'bx };
 						cpu_registers_write_index = instr_c;
 						cpu_registers_write_enable = 1;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_MUL: begin
 						cpu_registers_write = { do_math_mul, 240'bx };
 						cpu_registers_write_index = instr_c;
 						cpu_registers_write_enable = 1;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_DIV: begin
 						cpu_registers_write = { do_math_div, 240'bx };
 						cpu_registers_write_index = instr_c;
 						cpu_registers_write_enable = 1;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_BRANCH: begin // branch 0
 						if (cpu_registers_read_a == 0) begin
-							pc <= pc + 16'd16;
+							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end else begin
-							pc <= pc + 16'd32;
+							pc <= pc + 16'd2;
 							read_instruction_start <= 1;
 						end
 					end
@@ -218,32 +236,32 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 							cpu_registers_write = { input_fpga_out, 240'bx };
 							cpu_registers_write_index = instr_a;
 							cpu_registers_write_enable = 1;
-							pc <= pc + 16'd16;
+							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end
 					end
 					OP_STACK: begin
 						sp <= sp + instr_a;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_NSTACK: begin
 						sp <= sp - instr_a;
-						pc <= pc + 16'd16;
+						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_SUPERMANDIVE: begin
 						if (stack_write_start) begin
 							if (stack_write_done) begin
 								stack_write_start <= 0;
-								pc <= pc + 16'd16;
-								sp <= sp + 16'd256;
+								pc <= pc + 16'd1;
+								sp <= sp + 16'd16;
 								read_instruction_start <= 1;
 							end
 						end else begin
 							stack_write <= cpu_registers;
 							stack_address <= sp;
-							stack_bytes <= 16'd32;
+							stack_words <= 16'd16;
 							stack_write_start <= 1;
 						end
 					end
@@ -251,16 +269,16 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						if (stack_read_start) begin
 							if (stack_read_done) begin
 								cpu_registers_write = stack_read;
-								cpu_registers_write_index = 16'd32;
+								cpu_registers_write_index = 16'd16;
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
-								pc <= pc + 16'd16;
-								sp <= sp - 16'd256;
+								pc <= pc + 16'd1;
+								sp <= sp - 16'd16;
 								read_instruction_start <= 1;
 							end
 						end else begin
-							stack_address <= sp - 16'd256;
-							stack_bytes <= 16'd32;
+							stack_address <= sp - 16'd16;
+							stack_words <= 16'd16;
 							stack_read_start <= 1;
 						end
 					end
@@ -292,52 +310,83 @@ module led_output_dffr(input clock, enable, reset_n, input [15:0] d, output reg 
 	end
 endmodule
 
-// label: RAM
-module ram_read(input clock, start, input [15:0] hmmm, address, bytes, output reg [255:0] q, output reg done);
+module instruction_ram_read(input clock, start, input [63:0] ram_data, output reg[63:0] q, output reg done);
 	// TODO: state machine reading number of bytes
+	reg count = 0;
+	always@(posedge clock) begin
+		if (start) begin
+			if (!done) begin
+				// output to q after 1 cycle
+				// set done to high when finished
+				if (count == 0) count <= count + 1;
+				else begin 
+					q <= ram_data;
+					done <= 1;
+				end
+			end
+		end else begin
+			// reset to ready/starting state
+			done <= 0;
+			count <= 0;
+		end
+	end
+endmodule
+
+// label: RAM
+module stack_ram_read(input clock, start, input [15:0] ram_data, address, words, output reg [255:0] q, output reg [15:0] real_address, output reg done);
+	// TODO: state machine reading number of bytes
+	reg[4:0] count = 0;
+	integer i, k;
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
 				// output to q
 				// set done to high when finished
-				case (address)
-					16'd0: begin
-						q <= { 16'd12, 16'd0, 16'dx, 16'dx, 192'bx };
-					end
-					16'd16: begin
-						q <= { 16'd3, 16'd3, 16'd1, 16'dx, 192'bx };
-					end
-					16'd32: begin
-						q <= { 16'd5, 16'd0, 16'd1, 16'd2, 192'bx };
-					end
-					16'd48: begin
-						q <= { 16'd4, 16'd2, 16'dx, 16'dx, 192'bx };
-					end
-					16'd64: begin
-						q <= { 16'd0, 16'dx, 16'dx, 16'dx, 192'bx };
-					end
-				endcase
-				done <= 1;
+				real_address <= address + count;
+				if (count == words + 1) begin 
+					done <= 1;
+				end
+				else if (count == 0) count <= count + 1;
+				else begin
+					count <= count + 1;
+					for (i = 0, k = 255 - (count - 1) * 16; i < 16; i = i + 1)
+						q[k - i] = ram_data[15 - i];
+				end
 			end
 		end else begin
 			// reset to ready/starting state
 			done <= 0;
+			count <= 0;
+			real_address <= 0;
 		end
 	end
 endmodule
 
-module ram_write(input clock, start, input [15:0] address, bytes, input [255:0] data, output reg done);
+module stack_ram_write(input clock, start, input [15:0] address, words, input [255:0] data, output reg[15:0] stuff_to_write, real_address, output reg done);
 	// TODO: state machine write number of bytes
+	reg[4:0] count = 0;
+	integer i, k;
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
 				// write from data
 				// set done to high when finished
-				done <= 1;
+				real_address <= address + count;
+				if (count == words) begin
+					done <= 1;
+				end
+				else begin
+					count <= count + 1;
+					for(i = 0, k = 255 - (count * 16); i < 16; i = i + 1) begin
+						stuff_to_write[15 - i] <= data[k - i];
+					end
+				end
 			end
 		end else begin
 			// reset to ready/starting state
 			done <= 0;
+			count <= 0;
+			real_address <= address;
 		end
 	end
 endmodule
@@ -386,7 +435,7 @@ module cpu_registers_write_mux(input clock, enable, input [15:0] s, input [255:0
 				16'd13: cpu_registers[47:32] = in[255:240];
 				16'd14: cpu_registers[31:16] = in[255:240];
 				16'd15: cpu_registers[15:0] = in[255:240];
-				16'd32: cpu_registers = in;
+				16'd16: cpu_registers = in;
 				default: cpu_registers[255:240] = in[255:240];
 			endcase
 		end
