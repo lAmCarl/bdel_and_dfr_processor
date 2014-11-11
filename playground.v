@@ -1,5 +1,5 @@
 module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0] LEDG, output [17:0] LEDR);
-	assign LEDG[7:3] = { 5{ 1'd0 }};
+	assign LEDG[7:3] = { 5{ 1'd0 } };
 	assign LEDR[16] = 0;
 
 	reg [15:0] pc = 0, sp = 0;
@@ -23,7 +23,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	assign LEDG[1] = program_done;
 	assign LEDR[17] = program_error;
 
-	parameter 
+	parameter
 		  OP_LOAD = 16'd1
 		, OP_STORE = 16'd2
 		, OP_LITERAL = 16'd3
@@ -80,8 +80,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	wire stack_read_done, stack_write_done;
 	stack_ram_read u8(clock, stack_read_start, stack_read_values, stack_address, stack_words, stack_read, write_address, stack_read_done);
 	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, read_address, stack_write_done);
-	
-	assign stack_address_real = (stack_read_start == 0)? write_address : read_address;
+	assign stack_address_real = (stack_read_start == 0) ? write_address : read_address;
 	
 	stack_ram u11(
 			.address(stack_address_real),
@@ -91,7 +90,6 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 			.q(stack_read_values));
 
 	// Read instruction
-	wire [255:0] instruction_padded;
 	wire [63:0] instr_read_values;
 	instruction_ram_read u10(clock, read_instruction_start, instr_read_values, instruction, read_instruction_done);
 
@@ -311,21 +309,17 @@ module led_output_dffr(input clock, enable, reset_n, input [15:0] d, output reg 
 endmodule
 
 module instruction_ram_read(input clock, start, input [63:0] ram_data, output reg[63:0] q, output reg done);
-	// TODO: state machine reading number of bytes
 	reg count = 0;
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
-				// output to q after 1 cycle
-				// set done to high when finished
 				if (count == 0) count <= count + 1;
-				else begin 
+				else begin
 					q <= ram_data;
 					done <= 1;
 				end
 			end
 		end else begin
-			// reset to ready/starting state
 			done <= 0;
 			count <= 0;
 		end
@@ -334,14 +328,11 @@ endmodule
 
 // label: RAM
 module stack_ram_read(input clock, start, input [15:0] ram_data, address, words, output reg [255:0] q, output reg [15:0] real_address, output reg done);
-	// TODO: state machine reading number of bytes
-	reg[4:0] count = 0;
+	reg [4:0] count = 0;
 	integer i, k;
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
-				// output to q
-				// set done to high when finished
 				real_address <= address + count;
 				if (count == words + 1) begin 
 					done <= 1;
@@ -354,7 +345,6 @@ module stack_ram_read(input clock, start, input [15:0] ram_data, address, words,
 				end
 			end
 		end else begin
-			// reset to ready/starting state
 			done <= 0;
 			count <= 0;
 			real_address <= 0;
@@ -363,15 +353,11 @@ module stack_ram_read(input clock, start, input [15:0] ram_data, address, words,
 endmodule
 
 module stack_ram_write(input clock, start, input [15:0] address, words, input [255:0] data, output reg[15:0] stuff_to_write, real_address, output reg done);
-	// TODO: state machine write number of bytes
-	reg[4:0] count = 0;
+	reg [4:0] count = 0;
 	integer i, k;
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
-				// write from data
-				// set done to high when finished
-				real_address <= address + count;
 				if (count == words) begin
 					done <= 1;
 				end
@@ -383,10 +369,9 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 				end
 			end
 		end else begin
-			// reset to ready/starting state
 			done <= 0;
 			count <= 0;
-			real_address <= address;
+			real_address <= 0;
 		end
 	end
 endmodule
