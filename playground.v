@@ -1,5 +1,4 @@
 module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0] LEDG, output [17:0] LEDR);
-	// TODO: consecutive inputs
 	assign LEDG[7:3] = { 5{ 1'd0 } };
 	assign LEDR[16] = 0;
 
@@ -54,6 +53,7 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	// Input fpga
 	wire [15:0] input_fpga_out;
 	wire input_fpga_returned;
+	reg input_fpga_returned_prev_value = 0;
 	reg input_fpga_waiting;
 	assign input_fpga_out = SW[15:0];
 	assign input_fpga_returned = ~KEY[2];
@@ -116,6 +116,8 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 		input_fpga_waiting = 0;
 		cpu_registers_write = 0;
 		cpu_registers_write_index = 0;
+
+		input_fpga_returned_prev_value <= input_fpga_returned;
 		if (!reset_n) begin
 			program_running = 0;
 			idle <= 1;
@@ -181,11 +183,14 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 					OP_INPUT: begin
 						input_fpga_waiting = 1;
 						if (input_fpga_returned) begin
-							cpu_registers_write = { input_fpga_out, 240'bx };
-							cpu_registers_write_index = instr_a;
-							cpu_registers_write_enable = 1;
-							pc <= pc + 16'd1;
-							read_instruction_start <= 1;
+							if (!input_fpga_returned_prev_value) begin
+								input_fpga_returned_read <= 1;
+								cpu_registers_write = { input_fpga_out, 240'bx };
+								cpu_registers_write_index = instr_a;
+								cpu_registers_write_enable = 1;
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
+							end
 						end
 					end
 					OP_OUTPUT: begin
