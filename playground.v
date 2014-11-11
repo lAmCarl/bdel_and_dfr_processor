@@ -1,4 +1,5 @@
 module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0] LEDG, output [17:0] LEDR);
+	// TODO: consecutive inputs
 	assign LEDG[7:3] = { 5{ 1'd0 } };
 	assign LEDR[16] = 0;
 
@@ -24,27 +25,28 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 	assign LEDR[17] = program_error;
 
 	parameter
-		  OP_LOAD = 16'd1
+		  OP_EOF = 16'd0
+		, OP_LOAD = 16'd1
 		, OP_STORE = 16'd2
 		, OP_LITERAL = 16'd3
-		, OP_OUTPUT = 16'd4
-		, OP_ADD = 16'd5
-		, OP_SUB = 16'd6
-		, OP_MUL = 16'd7
-		, OP_DIV = 16'd8
-		, OP_BRANCH = 16'd9
-		, OP_JUMP = 16'd10
-		, OP_NJUMP = 16'd11
-		, OP_INPUT = 16'd12
+		, OP_INPUT = 16'd4
+		, OP_OUTPUT = 16'd5
+		, OP_ADD = 16'd6
+		, OP_SUB = 16'd7
+		, OP_MUL = 16'd8
+		, OP_DIV = 16'd9
+		, OP_CMP = 16'd10
+		, OP_BRANCH = 16'd11
+		, OP_JUMP = 16'd12
 		, OP_STACK = 16'd13
-		, OP_NSTACK = 16'd14
-		, OP_SUPERMANDIVE = 16'd15
-		, OP_GETUP = 16'd16
-		, OP_PRINT = 16'd17
-		, OP_EOF = 16'd0;
+		, OP_SUPERMANDIVE = 16'd14
+		, OP_GETUP = 16'd15
+		, OP_PRINT = 16'd16 // opcodes including and after 16 should later be system functions
+		, OP_DRAW = 16'd17
+		, OP_KEYBOARD = 16'd18;
 
 	// Output LED
-	// Use:led_output_in, led_output_write_enable
+	// Use: led_output_in, led_output_write_enable
 	reg [15:0] led_output_in = 0;
 	reg led_output_write_enable = 0;
 	led_output_dffr u0(clock, led_output_write_enable, reset_n, led_output_in, LEDR[15:0]);
@@ -176,6 +178,16 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
+					OP_INPUT: begin
+						input_fpga_waiting = 1;
+						if (input_fpga_returned) begin
+							cpu_registers_write = { input_fpga_out, 240'bx };
+							cpu_registers_write_index = instr_a;
+							cpu_registers_write_enable = 1;
+							pc <= pc + 16'd1;
+							read_instruction_start <= 1;
+						end
+					end
 					OP_OUTPUT: begin
 						led_output_in <= cpu_registers_read_a;
 						led_output_write_enable = 1;
@@ -210,7 +222,28 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
-					OP_BRANCH: begin // branch 0
+					OP_CMP: begin
+						if (cpu_registers_read_a == cpu_registers_read_b) begin
+							cpu_registers_write = { 16'd0, 240'bx };
+							cpu_registers_write_index = instr_c;
+							cpu_registers_write_enable = 0;
+							pc <= pc + 16'd1;
+							read_instruction_start <= 1;
+						end else if (cpu_registers_read_a < cpu_registers_read_b) begin
+							cpu_registers_write = { -16'd1, 240'bx };
+							cpu_registers_write_index = instr_c;
+							cpu_registers_write_enable = 0;
+							pc <= pc + 16'd1;
+							read_instruction_start <= 1;
+						end else begin
+							cpu_registers_write = { 16'd1, 240'bx };
+							cpu_registers_write_index = instr_c;
+							cpu_registers_write_enable = 0;
+							pc <= pc + 16'd1;
+							read_instruction_start <= 1;
+						end
+					end
+					OP_BRANCH: begin
 						if (cpu_registers_read_a == 0) begin
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
@@ -220,31 +253,11 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						end
 					end
 					OP_JUMP: begin
-						pc <= pc + instr_a;
+						pc <= instr_a;
 						read_instruction_start <= 1;
-					end
-					OP_NJUMP: begin
-						pc <= pc - instr_a;
-						read_instruction_start <= 1;
-					end
-					OP_INPUT: begin
-						// TODO: consecutive inputs
-						input_fpga_waiting = 1;
-						if (input_fpga_returned) begin
-							cpu_registers_write = { input_fpga_out, 240'bx };
-							cpu_registers_write_index = instr_a;
-							cpu_registers_write_enable = 1;
-							pc <= pc + 16'd1;
-							read_instruction_start <= 1;
-						end
 					end
 					OP_STACK: begin
 						sp <= sp + instr_a;
-						pc <= pc + 16'd1;
-						read_instruction_start <= 1;
-					end
-					OP_NSTACK: begin
-						sp <= sp - instr_a;
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
@@ -281,6 +294,12 @@ module playground(input CLOCK_50, input [2:0] KEY, input [15:0] SW, output [7:0]
 						end
 					end
 					OP_PRINT: begin
+						// TODO
+					end
+					OP_DRAW: begin
+						// TODO
+					end
+					OP_KEYBOARD: begin
 						// TODO
 					end
 					OP_EOF: begin
