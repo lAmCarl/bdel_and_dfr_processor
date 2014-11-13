@@ -1,0 +1,16 @@
+a:
+input 0
+literal 1 1
+cmp 0 1 2
+branch 2
+jump b
+jump c
+b:
+output 2
+jump d
+c:
+literal 3 3
+output 3
+jump d
+d:
+eof
