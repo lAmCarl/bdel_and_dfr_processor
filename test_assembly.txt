@@ -1,16 +1,16 @@
+begin:
+input r0
+input r1
+literal 24 r3
+add r0 r1 r2
+cmp r2 r3 r4
+branch r4
+jump 0 a
+jump 0 b
 a:
-input 0
-literal 1 1
-cmp 0 1 2
-branch 2
-jump b
-jump c
+jump 0 c
 b:
-output 2
-jump d
+output r2
+jump 0 begin
 c:
-literal 3 3
-output 3
-jump d
-d:
 eof
