@@ -32,9 +32,13 @@ module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode);
 					end
 				end
 			end
-			else
+			else begin
 				key_pressed <= 0;
 				ignore <= 0;
+			end
+		end 
+		else begin
+		key_pressed <= 0;
 		end
 	end
 	

@@ -52,7 +52,9 @@ module playground
 		, OP_GETUP = 16'd15
 		, OP_PRINT = 16'd16 // opcodes including and after 16 should later be system functions
 		, OP_DRAW = 16'd17 // <char_code> <x> <y>
-		, OP_KEYBOARD = 16'd18;
+		, OP_KEYBOARD = 16'd18
+		, OP_HEAP = 16'd19
+		, OP_UNHEAP = 16'd20;
 
 	// Output LED
 	// Use: led_output_in, led_output_write_enable
@@ -91,7 +93,10 @@ module playground
 	defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
 	defparam VGA.BACKGROUND_IMAGE = "background.mif";
 	
-	
+	// Input keyboard
+	wire key_pressed;
+	wire [7:0] keycode;
+	keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
 
 	// Input fpga
 	wire [15:0] input_fpga_out;
@@ -134,6 +139,23 @@ module playground
 			.data(stack_write_values),
 			.wren((stack_write_start && !stack_write_done)),
 			.q(stack_read_values));
+			
+	//Heap
+	reg [15:0] heap_address = 0;
+	wire heap_read_done;
+	reg heap_read_start = 0;
+	reg heap_write_start = 0, heap_write_enable = 0;
+	reg [15:0] heap_write_values;
+	wire [15:0] heap_read, heap_read_values;
+	
+	heap_ram_read u6(clock, heap_read_start, heap_read, heap_read_values, heap_read_done);
+	
+	heap_ram u13(
+			.address(heap_address),
+			.clock(clock),
+			.data(heap_write_values),
+			.wren(heap_write_enable),
+			.q(heap_read));
 
 	// Read instruction
 	wire [63:0] instr_read_values;
@@ -174,6 +196,9 @@ module playground
 			stack_address <= 0;
 			stack_words <= 0;
 			stack_write <= 0;
+			heap_read_start <= 0;
+			heap_write_start <= 0;
+			heap_address <= 0;
 			vga_draw_start <= 0;
 		end else begin
 			if (idle) begin // idle state
@@ -275,19 +300,19 @@ module playground
 						if (cpu_registers_read_a == cpu_registers_read_b) begin
 							cpu_registers_write = { 16'd0, 240'bx };
 							cpu_registers_write_index = instr_c;
-							cpu_registers_write_enable = 0;
+							cpu_registers_write_enable = 1;
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end else if (cpu_registers_read_a < cpu_registers_read_b) begin
 							cpu_registers_write = { -16'd1, 240'bx };
 							cpu_registers_write_index = instr_c;
-							cpu_registers_write_enable = 0;
+							cpu_registers_write_enable = 1;
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end else begin
 							cpu_registers_write = { 16'd1, 240'bx };
 							cpu_registers_write_index = instr_c;
-							cpu_registers_write_enable = 0;
+							cpu_registers_write_enable = 1;
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end
@@ -302,8 +327,10 @@ module playground
 						end
 					end
 					OP_JUMP: begin
-						pc <= instr_a;
-						read_instruction_start <= 1;
+						if (instr_a == 0)
+							pc <= instr_b;
+						else
+							pc <= cpu_registers_read_b;
 					end
 					OP_STACK: begin
 						sp <= sp + instr_a;
@@ -346,7 +373,6 @@ module playground
 						// TODO
 					end
 					OP_DRAW: begin
-						// TODO
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
 								vga_draw_start <= 0;
@@ -361,7 +387,39 @@ module playground
 						end	
 					end
 					OP_KEYBOARD: begin
-						// TODO
+						if (key_pressed) begin
+							cpu_registers_write = { 8'b0, keycode, 240'bx };
+							cpu_registers_write_index = instr_a;
+							cpu_registers_write_enable = 1;
+							pc <= pc + 16'd1;
+							read_instruction_start <= 1;
+						end
+					end
+					OP_HEAP: begin
+						if (heap_write_enable) begin
+							heap_write_enable <= 0;
+							pc <= pc + 16'd1;
+							read_instruction_start <= 1;
+						end else begin
+							heap_write_values <= cpu_registers_read_a;
+							heap_address <= cpu_registers_read_b;
+							heap_write_enable <= 1;
+						end
+					end
+					OP_UNHEAP: begin
+						if (heap_read_start) begin
+							if (heap_read_done) begin
+								cpu_registers_write <= { heap_read_values, 240'bx };
+								cpu_registers_write_index <= instr_b;
+								cpu_registers_write_enable = 1'b1;
+								heap_read_start <= 0;
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
+							end
+						end else begin
+							heap_address <= cpu_registers_read_a;
+							heap_read_start <= 1;
+						end
 					end
 					OP_EOF: begin
 						program_done = 1;
@@ -406,7 +464,7 @@ module instruction_ram_read(input clock, start, input [63:0] ram_data, output re
 	end
 endmodule
 
-// label: RAM
+// label: stack RAM
 module stack_ram_read(input clock, start, input [15:0] ram_data, address, words, output reg [255:0] q, output reg [15:0] real_address, output reg done);
 	reg [4:0] count = 0;
 	integer i, k;
@@ -455,6 +513,25 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 		end
 	end
 endmodule
+
+module heap_ram_read(input clock, start, input [15:0] ram_data, output reg[15:0] q, output reg done);
+	reg count = 0;
+	always@(posedge clock) begin
+		if (start) begin
+			if (!done) begin
+				if (count == 0) count <= count + 1;
+				else begin
+					q <= ram_data;
+					done <= 1;
+				end
+			end
+		end else begin
+			done <= 0;
+			count <= 0;
+		end
+	end
+endmodule
+
 
 module cpu_registers_read_mux(input [15:0] s, input [255:0] cpu_registers, output reg [15:0] out);
 	always@(*) begin
