@@ -1,7 +1,8 @@
 begin:
 input r0
-input r1
+input r1 # hello
 literal 24 r3
+#hello
 add r0 r1 r2
 cmp r2 r3 r4
 branch r4

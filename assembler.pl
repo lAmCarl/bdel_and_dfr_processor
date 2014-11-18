@@ -15,6 +15,7 @@ sub main {
 	my $labels = {};
 	my $count = 0;
 	foreach my $l (@all_lines) {
+		$l =~ s/#.*$//;
 		my @parts = split(/\s+/, $l);
 		if (@parts) {
 			if ($parts[0] =~ /([a-zA-Z]\w*):/) {
@@ -34,7 +35,7 @@ sub load_file {
 	my @lines = <$f>;
 	close $f;
 	chomp(@lines);
-	push $_[1], @lines;
+	push @{$_[1]}, @lines;
 }
 
 sub process_code {
@@ -59,7 +60,13 @@ sub process_instruction {
 		print_binary_instruction(binary_opcode_from_string($match[0]), $match[1], $match[2]);
 	} elsif ($instr =~ /(store) r(\d+) (\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
-	} elsif ($instr =~ /(literal) (\d+) r(\d+)/) {
+	} elsif ($instr =~ /(store) :([a-zA-Z]\w*) (\d+)/) {
+		if (exists($labels->{$2})) {
+			print_binary_instruction(binary_opcode_from_string($1), $labels->{$2}, $3);
+		} else {
+			die "Unknown label \"$3\"";
+		}
+	} elsif ($instr =~ /(literal) (-?\d+) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
 	} elsif ($instr =~ /(input) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2);
@@ -77,15 +84,15 @@ sub process_instruction {
 		print_binary_instruction(binary_opcode_from_string($1), $2, $3, $4);
 	} elsif ($instr =~ /(branch) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2);
-	} elsif ($instr =~ /(jump) (\d) ([a-zA-Z]\w*)/) {
-		if (exists($labels->{$3})) {
-			print_binary_instruction(binary_opcode_from_string($1), $2, $labels->{$3});
+	} elsif ($instr =~ /(jump) r(\d+)/) {
+		print_binary_instruction(binary_opcode_from_string($1, 1, $2));
+	} elsif ($instr =~ /(jump) :([a-zA-Z]\w*)/) {
+		if (exists($labels->{$2})) {
+			print_binary_instruction(binary_opcode_from_string($1), 0, $labels->{$2});
 		} else {
 			die "Unknown label \"$3\"";
 		}
-	} elsif ($instr =~ /(jump) (\d) r(\d+)/) {
-		print_binary_instruction(binary_opcode_from_string($1, $2, $3));
-	} elsif ($instr =~ /(stack) (\d+)/) {
+	} elsif ($instr =~ /(stack) (-?\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2);
 	} elsif ($instr =~ /(supermandive)/) {
 		print_binary_instruction(binary_opcode_from_string($1));
@@ -101,6 +108,8 @@ sub process_instruction {
 		print_binary_instruction(binary_opcode_from_string($1, $2, $3));
 	} elsif ($instr =~ /(unheap) r(\d+) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1, $2, $3));
+	} elsif ($instr =~ /(return) r(\d+) (\d+)/) {
+		print_binary_instruction(binary_opcode_from_string("store", $2, $3 + 256));
 	} else {
 		die "Unknown instruction \"$instr\"";
 	}
@@ -137,7 +146,7 @@ sub binary_opcode_from_string {
 sub print_binary_instruction {
 	my $i = 0;
 	foreach (@_) {
-		print sprintf('%04x ', $_);
+		print substr(sprintf('%04x ', $_), -5);
 		$i++;
 	}
 	foreach ($i..4 - 1) {
