@@ -40,15 +40,18 @@ sub load_file {
 
 sub process_code {
 	my $lines = $_[0];
+	my $i = 0;
 	foreach my $l (@$lines) {
-		process_instruction($l->[0], [@$l[1..@$l - 1]], $_[1]);
+		process_instruction($i, $l->[0], [@$l[1..@$l - 1]], $_[1]);
+		$i++;
 	}
 }
 
 sub process_instruction {
-	my $opcode = $_[0];
-	my $args = $_[1];
-	my $labels = $_[2];
+	my $pos = $_[0];
+	my $opcode = $_[1];
+	my $args = $_[2];
+	my $labels = $_[3];
 	# Yes I know I just joined the line I split
 	# I wanted to try out more perl stuff
 	# e.g. slicing and passing an array ref, capturing matches
@@ -60,14 +63,14 @@ sub process_instruction {
 		print_binary_instruction(binary_opcode_from_string($match[0]), $match[1], $match[2]);
 	} elsif ($instr =~ /(store) r(\d+) (\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
-	} elsif ($instr =~ /(store) :([a-zA-Z]\w*) (\d+)/) {
+	} elsif ($instr =~ /(literal) (-?\d+) r(\d+)/) {
+		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
+	} elsif ($instr =~ /(literal) :([a-zA-Z]\w*) r(\d+)/) {
 		if (exists($labels->{$2})) {
 			print_binary_instruction(binary_opcode_from_string($1), $labels->{$2}, $3);
 		} else {
-			die "Unknown label \"$3\"";
+			die "Unknown label \"$2\"";
 		}
-	} elsif ($instr =~ /(literal) (-?\d+) r(\d+)/) {
-		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
 	} elsif ($instr =~ /(input) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2);
 	} elsif ($instr =~ /(output) r(\d+)/) {
@@ -85,7 +88,7 @@ sub process_instruction {
 	} elsif ($instr =~ /(branch) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2);
 	} elsif ($instr =~ /(jump) r(\d+)/) {
-		print_binary_instruction(binary_opcode_from_string($1, 1, $2));
+		print_binary_instruction(binary_opcode_from_string($1), 1, $2);
 	} elsif ($instr =~ /(jump) :([a-zA-Z]\w*)/) {
 		if (exists($labels->{$2})) {
 			print_binary_instruction(binary_opcode_from_string($1), 0, $labels->{$2});
@@ -105,15 +108,14 @@ sub process_instruction {
 	} elsif ($instr =~ /(keyboard) r(\d+)/) {
 		print_binary_instruction(binary_opcode_from_string($1), $2);
 	} elsif ($instr =~ /(heap) r(\d+) r(\d+)/) {
-		print_binary_instruction(binary_opcode_from_string($1, $2, $3));
+		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
 	} elsif ($instr =~ /(unheap) r(\d+) r(\d+)/) {
-		print_binary_instruction(binary_opcode_from_string($1, $2, $3));
+		print_binary_instruction(binary_opcode_from_string($1), $2, $3);
 	} elsif ($instr =~ /(return) r(\d+) (\d+)/) {
-		print_binary_instruction(binary_opcode_from_string("store", $2, $3 + 256));
+		print_binary_instruction(binary_opcode_from_string("store"), $2, $3 + 16);
 	} else {
 		die "Unknown instruction \"$instr\"";
 	}
-	print "\n";
 }
 
 sub binary_opcode_from_string {
@@ -152,4 +154,5 @@ sub print_binary_instruction {
 	foreach ($i..4 - 1) {
 		print sprintf('%04x ', 0);
 	}
+	print("\n");
 }

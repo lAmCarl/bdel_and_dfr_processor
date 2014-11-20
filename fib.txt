@@ -1,0 +1,75 @@
+input r15
+stack 1
+supermandive
+stack 2
+store r15 1
+literal :back r0
+store r0 2
+jump :fib
+back:
+stack -2
+getup
+load 1 r15
+stack -1
+output r15
+jump :end
+
+fib:
+load 1 r13 # argument
+load 2 r2 # return address
+literal 0 r3 # constant
+literal 1 r4 # constant
+cmp r13 r3 r5
+branch r5
+jump :is_zero
+jump :not_zero
+
+is_zero:
+return r3 3
+jump r2
+
+not_zero:
+cmp r13 r4 r5
+branch r5
+jump :is_one
+jump :not_one
+
+is_one:
+return r4 3
+jump r2
+
+not_one:
+sub r13 r4 r6 # x - 1
+stack 1 # return value
+supermandive # save registers
+stack 2 # return jump address and argument
+store r6 1 # argument
+literal :hmmm r0
+store r0 2 # this is return jump address
+jump :fib # jump to function
+hmmm:
+stack -2 # function args tatck
+getup # restore registers
+load 1 r7 # return value
+stack -1
+
+stack 1
+supermandive
+stack 2
+sub r6 r4 r8 # x - 1 - 1
+store r8 1
+literal :hm r0
+store r0 2
+jump :fib
+hm:
+stack -2
+getup
+load 1 r9 # return value
+stack -1
+
+add r7 r9 r10
+return r10 3
+jump r2
+
+end:
+eof
