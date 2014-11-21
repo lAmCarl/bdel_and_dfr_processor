@@ -12,7 +12,7 @@ module playground
 	assign LEDG[7:3] = { 5{ 1'd0 } };
 	assign LEDR[16] = 0;
 
-	reg [15:0] pc = 0, sp = 0;
+	reg signed [15:0] pc = 0, sp = 0;
 	reg read_instruction_start = 0;
 	wire read_instruction_done;
 	reg idle = 1;
@@ -25,7 +25,7 @@ module playground
 	assign reset_n = KEY[0];
 	
 	wire [63:0] instruction;
-	wire [15:0] opcode, instr_a, instr_b, instr_c;
+	wire signed [15:0] opcode, instr_a, instr_b, instr_c;
 	assign { opcode, instr_a, instr_b, instr_c } = instruction;
 
 	reg program_running, program_done, program_error;
@@ -50,11 +50,13 @@ module playground
 		, OP_STACK = 16'd13
 		, OP_SUPERMANDIVE = 16'd14
 		, OP_GETUP = 16'd15
-		, OP_PRINT = 16'd16 // opcodes including and after 16 should later be system functions
+		, OP_PRINTINT = 16'd16 // opcodes including and after 16 should later be system functions
 		, OP_DRAW = 16'd17 // <char_code> <x> <y>
 		, OP_KEYBOARD = 16'd18
 		, OP_HEAP = 16'd19
-		, OP_UNHEAP = 16'd20;
+		, OP_UNHEAP = 16'd20
+		, OP_KEYINT = 16'd21
+		, OP_PRINTHEX = 16'd22;
 
 	// Output LED
 	// Use: led_output_in, led_output_write_enable
@@ -67,11 +69,12 @@ module playground
 	reg [8:0] draw_X = 0; //lowercase for location of pixel, uppercase for location of character's top-left pixel
 	wire [7:0] draw_y;
 	reg [7:0] draw_Y = 0;
-	reg [7:0] char_code = 0;
+	reg [31:0] char_code = 0;
+	reg [1:0] num_chars = 0;
 	wire draw_colour, draw_en;
 	reg vga_draw_start = 0;
 	wire vga_draw_done;
-	vga_draw_character u1(clock, vga_draw_start, reset_n, draw_X, draw_Y, char_code, draw_en, vga_draw_done, draw_colour, draw_x, draw_y);
+	vga_draw_character u1(clock, vga_draw_start, reset_n, draw_X, draw_Y, char_code, num_chars, draw_en, vga_draw_done, draw_colour, draw_x, draw_y);
 	vga_adapter VGA(
 		.resetn(reset_n),
 		.clock(CLOCK_50),
@@ -96,6 +99,7 @@ module playground
 	// Input keyboard
 	wire key_pressed;
 	wire [7:0] keycode;
+	reg [15:0] key_int;
 	keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
 
 	// Input fpga
@@ -113,13 +117,13 @@ module playground
 	reg cpu_registers_write_enable;
 	reg [15:0] cpu_registers_write_index;
 
-	wire [15:0] cpu_registers_read_a, cpu_registers_read_b, cpu_registers_read_c;
-	cpu_registers_read_mux u2(instr_a, cpu_registers, cpu_registers_read_a);
-	cpu_registers_read_mux u3(instr_b, cpu_registers, cpu_registers_read_b);
-	cpu_registers_read_mux u4(instr_c, cpu_registers, cpu_registers_read_c);
+	wire signed [15:0] cpu_registers_read_a, cpu_registers_read_b, cpu_registers_read_c;
+	cpu_registers_read_mux u2(instr_a[3:0], cpu_registers, cpu_registers_read_a);
+	cpu_registers_read_mux u3(instr_b[3:0], cpu_registers, cpu_registers_read_b);
+	cpu_registers_read_mux u4(instr_c[3:0], cpu_registers, cpu_registers_read_c);
 	
 	reg [255:0] cpu_registers_write;
-	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index, cpu_registers_write, cpu_registers);
+	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index[4:0], cpu_registers_write, cpu_registers);
 	
 	// Stack
 	// Use: stack_address, stack_words, stack_read, stack_write
@@ -127,21 +131,26 @@ module playground
 	reg [255:0] stack_write = 0;
 	reg [15:0] stack_address = 0, stack_words = 0;
 	reg stack_read_start = 0, stack_write_start = 0;
-	wire [15:0] stack_write_values, stack_read_values, read_address, write_address, stack_address_real;
+	wire [15:0] stack_write_values, stack_read_values, read_address, write_address; 
+	reg [11:0] stack_address_real = 0;
 	wire stack_read_done, stack_write_done;
-	stack_ram_read u8(clock, stack_read_start, stack_read_values, stack_address, stack_words, stack_read, write_address, stack_read_done);
-	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, read_address, stack_write_done);
-	assign stack_address_real = (stack_read_start == 0) ? write_address : read_address;
+	stack_ram_read u8(clock, stack_read_start, stack_read_values, stack_address, stack_words, stack_read, read_address, stack_read_done);
+	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, write_address, stack_write_done);
+	always@(*)
+		if(stack_write_start)
+			stack_address_real = write_address;
+		else
+			stack_address_real = read_address;
 	
 	stack_ram u11(
 			.address(stack_address_real),
 			.clock(clock),
 			.data(stack_write_values),
-			.wren((stack_write_start && !stack_write_done)),
+			.wren((stack_write_start)),
 			.q(stack_read_values));
 			
 	//Heap
-	reg [15:0] heap_address = 0;
+	reg [11:0] heap_address = 0;
 	wire heap_read_done;
 	reg heap_read_start = 0;
 	reg heap_write_start = 0, heap_write_enable = 0;
@@ -162,9 +171,9 @@ module playground
 	instruction_ram_read u10(clock, read_instruction_start, instr_read_values, instruction, read_instruction_done);
 
 	instruction_ram u12(
-			.address(pc),
+			.address(pc[9:0]),
 			.clock(clock),
-			.data(16'bx),
+			.data(64'bx),
 			.wren(1'b0),
 			.q(instr_read_values));
 	
@@ -173,6 +182,10 @@ module playground
 	assign do_math_sub = cpu_registers_read_a - cpu_registers_read_b;
 	assign do_math_mul = cpu_registers_read_a * cpu_registers_read_b;
 	assign do_math_div = cpu_registers_read_a / cpu_registers_read_b;
+	
+	reg[3:0] count = 0;
+	reg[31:0] display_int = { 8'd36, 8'd36, 8'd36, 8'd36 };
+	integer i;
 	always@(posedge clock) begin
 		cpu_registers_write_enable = 0;
 		led_output_write_enable = 0;
@@ -200,6 +213,8 @@ module playground
 			heap_write_start <= 0;
 			heap_address <= 0;
 			vga_draw_start <= 0;
+			count <= 0;
+			display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
 		end else begin
 			if (idle) begin // idle state
 				program_running = 0;
@@ -327,10 +342,14 @@ module playground
 						end
 					end
 					OP_JUMP: begin
-						if (instr_a == 0)
+						if (instr_a == 0) begin
 							pc <= instr_b;
-						else
+							read_instruction_start <= 1;
+						end
+						else begin
 							pc <= cpu_registers_read_b;
+							read_instruction_start <= 1;
+						end
 					end
 					OP_STACK: begin
 						sp <= sp + instr_a;
@@ -369,8 +388,52 @@ module playground
 							stack_read_start <= 1;
 						end
 					end
-					OP_PRINT: begin
-						// TODO
+					OP_PRINTHEX: begin
+						if (vga_draw_start) begin
+							if (vga_draw_done) begin
+								vga_draw_start <= 0;
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
+							end
+						end else begin
+							char_code <= { 4'b0, cpu_registers_read_a[15:12], 4'b0, cpu_registers_read_a[11:8], 
+								4'b0, cpu_registers_read_a[7:4], 4'b0, cpu_registers_read_a[3:0] };
+							//char_code[31:24] <= (cpu_registers_read_a / 1000) % 10;
+							//char_code[23:16] <= (cpu_registers_read_a / 100) % 10;
+							//char_code[15:8] <= (cpu_registers_read_a / 10) % 10;
+							//char_code[7:0] <= cpu_registers_read_a % 10;
+							draw_X <= instr_b[8:0];
+							draw_Y <= instr_c[7:0];
+							num_chars <= 2'd3;
+							vga_draw_start <= 1;
+						end								
+					end
+					OP_PRINTINT: begin
+						if (vga_draw_start) begin
+							if (vga_draw_done) begin
+								if (count == 4) begin
+									pc <= pc + 16'd1;
+									read_instruction_start <= 1;
+								end
+								vga_draw_start <= 0;
+							end
+						end else if (count == 0) begin
+							char_code[31:24] <= (cpu_registers_read_a / 10'd1000) % 4'd10;
+							count <= count + 1;
+						end else if (count == 1) begin
+							char_code[23:16] <= (cpu_registers_read_a / 7'd100) % 4'd10;
+							count <= count + 1;
+						end else if (count == 2) begin
+							char_code[15:8] <= (cpu_registers_read_a / 4'd10) % 4'd10;
+							count <= count + 1;
+						end else if (count == 3) begin
+							char_code[7:0] <= (cpu_registers_read_a  % 4'd10);
+							draw_X <= instr_b[8:0];
+							draw_Y <= instr_c[7:0];
+							num_chars <= 2'd3;
+							vga_draw_start <= 1;
+							count <= count + 1;
+						end								
 					end
 					OP_DRAW: begin
 						if (vga_draw_start) begin
@@ -380,19 +443,57 @@ module playground
 								read_instruction_start <= 1;
 							end
 						end else begin
-							char_code <= cpu_registers_read_a[7:0];
+							char_code <= { cpu_registers_read_a[7:0], 24'b0 };
 							draw_X <= instr_b[8:0];
 							draw_Y <= instr_c[7:0];
+							num_chars <= 0;
 							vga_draw_start <= 1;
 						end	
 					end
 					OP_KEYBOARD: begin
 						if (key_pressed) begin
 							cpu_registers_write = { 8'b0, keycode, 240'bx };
-							cpu_registers_write_index = instr_a;
+							cpu_registers_write_index = instr_c;
 							cpu_registers_write_enable = 1;
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
+						end
+					end
+					OP_KEYINT: begin
+						if (vga_draw_start) begin
+							if (vga_draw_done) begin
+								vga_draw_start <= 0;
+							end
+						end else if (key_pressed) begin
+							if (keycode != 8'd255) begin
+								if (keycode == 8'd98) begin
+									cpu_registers_write <= { key_int, 240'bx };
+									cpu_registers_write_index <= instr_c;
+									cpu_registers_write_enable <= 1;
+									display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
+									key_int <= 0;
+									count <= 0;
+									pc <= pc + 16'd1;
+									read_instruction_start <= 1;
+								end else if (keycode < 8'd16)begin
+									if(count != 4) begin
+										key_int = key_int << 4;
+										key_int[3:0] = keycode [3:0];
+										display_int[31:24] = { 4'b0, key_int [15:12] };
+										display_int[23:16] = { 4'b0, key_int [11:8] };
+										display_int[15:8] = { 4'b0, key_int [7:4] };
+										display_int[7:0] = {4'b0, key_int [3:0] };
+										for (i = 0; i < (2'd3 - count) && i < 2'd3; i = i + 1)
+											display_int = display_int << 8;
+										char_code = { display_int };
+										draw_X <= instr_a[8:0];
+										draw_Y <= instr_b[7:0];
+										num_chars <= count;
+										vga_draw_start <= 1;
+										count <= count + 1;
+									end
+								end
+							end
 						end
 					end
 					OP_HEAP: begin
@@ -472,20 +573,22 @@ module stack_ram_read(input clock, start, input [15:0] ram_data, address, words,
 		if (start) begin
 			if (!done) begin
 				real_address <= address + count;
-				if (count == words + 1) begin 
+				count <= count + 1;
+				if (count == words + 2'd2)
 					done <= 1;
-				end
-				else if (count == 0) count <= count + 1;
-				else begin
-					count <= count + 1;
-					for (i = 0, k = 255 - (count - 1) * 16; i < 16; i = i + 1)
+				else if (count > 1) begin
+					//q[255:240] <= ram_data;
+					k = (16'd255 - (count - 2) * 16);
+					for (i = 0; i < 16; i = i + 1) begin
 						q[k - i] = ram_data[15 - i];
+					end
 				end
 			end
 		end else begin
 			done <= 0;
 			count <= 0;
 			real_address <= 0;
+			q <= 0;
 		end
 	end
 endmodule
@@ -496,13 +599,15 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
-				if (count == words) begin
+				if (count == words)
 					done <= 1;
-				end
 				else begin
 					count <= count + 1;
-					for(i = 0, k = 255 - (count * 16); i < 16; i = i + 1) begin
-						stuff_to_write[15 - i] <= data[k - i];
+					real_address <= address + count;
+					//stuff_to_write <= data[255:240];
+					k = (16'd255 - (count * 16));
+					for (i = 0; i < 16; i = i + 1) begin
+						stuff_to_write[15 - i] <= data [k - i];
 					end
 				end
 			end
@@ -510,6 +615,7 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 			done <= 0;
 			count <= 0;
 			real_address <= 0;
+			stuff_to_write <= 0;
 		end
 	end
 endmodule
@@ -533,71 +639,88 @@ module heap_ram_read(input clock, start, input [15:0] ram_data, output reg[15:0]
 endmodule
 
 
-module cpu_registers_read_mux(input [15:0] s, input [255:0] cpu_registers, output reg [15:0] out);
+module cpu_registers_read_mux(input [3:0] s, input [255:0] cpu_registers, output reg [15:0] out);
 	always@(*) begin
 		case (s)
-			16'd0: out = cpu_registers[255:240];
-			16'd1: out = cpu_registers[239:224];
-			16'd2: out = cpu_registers[223:208];
-			16'd3: out = cpu_registers[207:192];
-			16'd4: out = cpu_registers[191:176];
-			16'd5: out = cpu_registers[175:160];
-			16'd6: out = cpu_registers[159:144];
-			16'd7: out = cpu_registers[143:128];
-			16'd8: out = cpu_registers[127:112];
-			16'd9: out = cpu_registers[111:96];
-			16'd10: out = cpu_registers[95:80];
-			16'd11: out = cpu_registers[79:64];
-			16'd12: out = cpu_registers[63:48];
-			16'd13: out = cpu_registers[47:32];
-			16'd14: out = cpu_registers[31:16];
-			16'd15: out = cpu_registers[15:0];
+			4'd0: out = cpu_registers[255:240];
+			4'd1: out = cpu_registers[239:224];
+			4'd2: out = cpu_registers[223:208];
+			4'd3: out = cpu_registers[207:192];
+			4'd4: out = cpu_registers[191:176];
+			4'd5: out = cpu_registers[175:160];
+			4'd6: out = cpu_registers[159:144];
+			4'd7: out = cpu_registers[143:128];
+			4'd8: out = cpu_registers[127:112];
+			4'd9: out = cpu_registers[111:96];
+			4'd10: out = cpu_registers[95:80];
+			4'd11: out = cpu_registers[79:64];
+			4'd12: out = cpu_registers[63:48];
+			4'd13: out = cpu_registers[47:32];
+			4'd14: out = cpu_registers[31:16];
+			4'd15: out = cpu_registers[15:0];
 			default: out = cpu_registers[255:240];
 		endcase
 	end
 endmodule
 
-module cpu_registers_write_mux(input clock, enable, input [15:0] s, input [255:0] in, output reg [255:0] cpu_registers);
+module cpu_registers_write_mux(input clock, enable, input [4:0] s, input [255:0] in, output reg [255:0] cpu_registers);
 	always@(posedge clock) begin
 		if (enable) begin
 			case (s)
-				16'd0: cpu_registers[255:240] = in[255:240];
-				16'd1: cpu_registers[239:224] = in[255:240];
-				16'd2: cpu_registers[223:208] = in[255:240];
-				16'd3: cpu_registers[207:192] = in[255:240];
-				16'd4: cpu_registers[191:176] = in[255:240];
-				16'd5: cpu_registers[175:160] = in[255:240];
-				16'd6: cpu_registers[159:144] = in[255:240];
-				16'd7: cpu_registers[143:128] = in[255:240];
-				16'd8: cpu_registers[127:112] = in[255:240];
-				16'd9: cpu_registers[111:96] = in[255:240];
-				16'd10: cpu_registers[95:80] = in[255:240];
-				16'd11: cpu_registers[79:64] = in[255:240];
-				16'd12: cpu_registers[63:48] = in[255:240];
-				16'd13: cpu_registers[47:32] = in[255:240];
-				16'd14: cpu_registers[31:16] = in[255:240];
-				16'd15: cpu_registers[15:0] = in[255:240];
-				16'd16: cpu_registers = in;
+				5'd0: cpu_registers[255:240] = in[255:240];
+				5'd1: cpu_registers[239:224] = in[255:240];
+				5'd2: cpu_registers[223:208] = in[255:240];
+				5'd3: cpu_registers[207:192] = in[255:240];
+				5'd4: cpu_registers[191:176] = in[255:240];
+				5'd5: cpu_registers[175:160] = in[255:240];
+				5'd6: cpu_registers[159:144] = in[255:240];
+				5'd7: cpu_registers[143:128] = in[255:240];
+				5'd8: cpu_registers[127:112] = in[255:240];
+				5'd9: cpu_registers[111:96] = in[255:240];
+				5'd10: cpu_registers[95:80] = in[255:240];
+				5'd11: cpu_registers[79:64] = in[255:240];
+				5'd12: cpu_registers[63:48] = in[255:240];
+				5'd13: cpu_registers[47:32] = in[255:240];
+				5'd14: cpu_registers[31:16] = in[255:240];
+				5'd15: cpu_registers[15:0] = in[255:240];
+				5'd16: cpu_registers = in;
 				default: cpu_registers[255:240] = in[255:240];
 			endcase
 		end
 	end
 endmodule
 
-module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:0] Y, input [7:0] char_code, output reg draw_en, done, colour, output reg [8:0] x, output reg [7:0] y);
+module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:0] Y, input [31:0] char_code, input [1:0] num_chars, output reg draw_en, done, colour, output reg [8:0] x, output reg [7:0] y);
 	wire [0:47]  pixels;
-   char_to_pixels u0(char_code, pixels);
-
+	reg [7:0] chars;
+	reg [1:0] count = 0;
+   char_to_pixels u0(chars, pixels);
+	reg [4:0] i = 5'd31;
    // Data path
 	reg [5:0] counter = 0;
+	integer k;
    always@(posedge clock) begin
 		if (start) begin
+			if (count == 0)
+				chars[7:0] = char_code[31:24];
 			if (!done) begin
 				if (counter == 6'd47) begin
-					done <= 1;
+					if (count == num_chars)
+						done <= 1;
+					else begin
+						count <= count + 1;
+						i = 31 - ((count + 1) * 8);
+						counter <= 0;
+						for (k = 0; k < 8; k = k + 1)
+							chars[7 - k] = char_code[i - k];
+						
+					end
 				end
+				i = 31 - (count * 8);
+				for (k = 0; k < 8; k = k + 1)
+					chars[7 - k] = char_code[i - k];
 				draw_en <= 1;
-				x <= X * 6 + (counter % 6);
+				x <= (X + count) * 6 + (counter % 6);
 				y <= Y * 8 + (counter / 6);
 				colour <= pixels[counter];
 				counter <= counter + 1;
@@ -606,7 +729,11 @@ module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:
 		else begin
 			draw_en <= 0;
 			counter <= 0;
+			count <= 0;
 			done <= 0;
+			i = 5'd31;
+			for (k = 0; k < 8; k = k + 1)
+					chars[7 - k] = char_code[i - k];
 		end
 	end
  endmodule
