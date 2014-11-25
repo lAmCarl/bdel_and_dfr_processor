@@ -84,6 +84,7 @@ module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode);
 		8'h72: keycode = 8'd99; //key down
 		8'h75: keycode = 8'd100; //key up
       8'h29: keycode = 8'd36; // space
+		8'h66: keycode = 8'd37; // delete
       8'h49: keycode = 8'd38; // period
 		default: keycode = 8'd255;
 		endcase

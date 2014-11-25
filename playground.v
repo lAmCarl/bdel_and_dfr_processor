@@ -35,7 +35,7 @@ module playground
 
 	parameter
 		  OP_EOF = 16'd0
-		, OP_LOAD = 16'd1
+		, OP_LOAD = 16'd1 // <
 		, OP_STORE = 16'd2
 		, OP_LITERAL = 16'd3
 		, OP_INPUT = 16'd4
@@ -56,7 +56,10 @@ module playground
 		, OP_HEAP = 16'd19
 		, OP_UNHEAP = 16'd20
 		, OP_KEYINT = 16'd21
-		, OP_PRINTHEX = 16'd22;
+		, OP_PRINTHEX = 16'd22
+		, OP_INC = 16'd23
+		, OP_DEC = 16'd24
+		, OP_MOV = 16'd25;
 
 	// Output LED
 	// Use: led_output_in, led_output_write_enable
@@ -82,7 +85,7 @@ module playground
 		.x(draw_x),
 		.y(draw_y),
 		.plot(draw_en),
-		/* Signals for the DAC to drive the monitor. */
+		// Signals for the DAC to drive the monitor. 
 		.VGA_R(VGA_R),
 		.VGA_G(VGA_G),
 		.VGA_B(VGA_B),
@@ -177,13 +180,15 @@ module playground
 			.wren(1'b0),
 			.q(instr_read_values));
 	
-	wire [15:0] do_math_add, do_math_sub, do_math_mul, do_math_div;
+	wire [15:0] do_math_add, do_math_sub, do_math_mul, do_math_div, do_math_inc, do_math_dec;
 	assign do_math_add = cpu_registers_read_a + cpu_registers_read_b;
 	assign do_math_sub = cpu_registers_read_a - cpu_registers_read_b;
 	assign do_math_mul = cpu_registers_read_a * cpu_registers_read_b;
 	assign do_math_div = cpu_registers_read_a / cpu_registers_read_b;
+	assign do_math_inc = cpu_registers_read_a + 16'b1;
+	assign do_math_dec = cpu_registers_read_a - 16'b1;
 	
-	reg[3:0] count = 0;
+	reg[10:0] count = 0;
 	reg[31:0] display_int = { 8'd36, 8'd36, 8'd36, 8'd36 };
 	integer i;
 	always@(posedge clock) begin
@@ -361,13 +366,13 @@ module playground
 							if (stack_write_done) begin
 								stack_write_start <= 0;
 								pc <= pc + 16'd1;
-								sp <= sp + 16'd16;
+								sp <= sp + 16'd15;
 								read_instruction_start <= 1;
 							end
 						end else begin
 							stack_write <= cpu_registers;
 							stack_address <= sp;
-							stack_words <= 16'd16;
+							stack_words <= 16'd15;
 							stack_write_start <= 1;
 						end
 					end
@@ -379,21 +384,23 @@ module playground
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
 								pc <= pc + 16'd1;
-								sp <= sp - 16'd16;
+								sp <= sp - 16'd15;
 								read_instruction_start <= 1;
 							end
 						end else begin
-							stack_address <= sp - 16'd16;
-							stack_words <= 16'd16;
+							stack_address <= sp - 16'd15;
+							stack_words <= 16'd15;
 							stack_read_start <= 1;
 						end
 					end
 					OP_PRINTHEX: begin
+						input_fpga_waiting = 1;
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
 								vga_draw_start <= 0;
 								pc <= pc + 16'd1;
 								read_instruction_start <= 1;
+								input_fpga_waiting = 0;
 							end
 						end else begin
 							char_code <= { 4'b0, cpu_registers_read_a[15:12], 4'b0, cpu_registers_read_a[11:8], 
@@ -402,8 +409,8 @@ module playground
 							//char_code[23:16] <= (cpu_registers_read_a / 100) % 10;
 							//char_code[15:8] <= (cpu_registers_read_a / 10) % 10;
 							//char_code[7:0] <= cpu_registers_read_a % 10;
-							draw_X <= instr_b[8:0];
-							draw_Y <= instr_c[7:0];
+							draw_X <= cpu_registers_read_b[8:0];
+							draw_Y <= cpu_registers_read_c[7:0];
 							num_chars <= 2'd3;
 							vga_draw_start <= 1;
 						end								
@@ -428,8 +435,8 @@ module playground
 							count <= count + 1;
 						end else if (count == 3) begin
 							char_code[7:0] <= (cpu_registers_read_a  % 4'd10);
-							draw_X <= instr_b[8:0];
-							draw_Y <= instr_c[7:0];
+							draw_X <= cpu_registers_read_b[8:0];
+							draw_Y <= cpu_registers_read_c[7:0];
 							num_chars <= 2'd3;
 							vga_draw_start <= 1;
 							count <= count + 1;
@@ -444,8 +451,8 @@ module playground
 							end
 						end else begin
 							char_code <= { cpu_registers_read_a[7:0], 24'b0 };
-							draw_X <= instr_b[8:0];
-							draw_Y <= instr_c[7:0];
+							draw_X <= cpu_registers_read_b[8:0];
+							draw_Y <= cpu_registers_read_c[7:0];
 							num_chars <= 0;
 							vga_draw_start <= 1;
 						end	
@@ -460,6 +467,7 @@ module playground
 						end
 					end
 					OP_KEYINT: begin
+						input_fpga_waiting = 1;
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
 								vga_draw_start <= 0;
@@ -474,6 +482,7 @@ module playground
 									key_int <= 0;
 									count <= 0;
 									pc <= pc + 16'd1;
+									input_fpga_waiting = 0;
 									read_instruction_start <= 1;
 								end else if (keycode < 8'd16)begin
 									if(count != 4) begin
@@ -486,8 +495,8 @@ module playground
 										for (i = 0; i < (2'd3 - count) && i < 2'd3; i = i + 1)
 											display_int = display_int << 8;
 										char_code = { display_int };
-										draw_X <= instr_a[8:0];
-										draw_Y <= instr_b[7:0];
+										draw_X <= cpu_registers_read_a[8:0];
+										draw_Y <= cpu_registers_read_b[7:0];
 										num_chars <= count;
 										vga_draw_start <= 1;
 										count <= count + 1;
@@ -521,6 +530,27 @@ module playground
 							heap_address <= cpu_registers_read_a;
 							heap_read_start <= 1;
 						end
+					end
+					OP_INC: begin
+						cpu_registers_write = { do_math_inc, 240'bx };
+						cpu_registers_write_index = instr_a;
+						cpu_registers_write_enable = 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_DEC: begin
+						cpu_registers_write <= { do_math_dec, 240'bx };
+						cpu_registers_write_index <= instr_a;
+						cpu_registers_write_enable <= 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_MOV: begin
+						cpu_registers_write <= { cpu_registers_read_a, 240'bx };
+						cpu_registers_write_index <= instr_b;
+						cpu_registers_write_enable <= 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
 					end
 					OP_EOF: begin
 						program_done = 1;
@@ -683,7 +713,7 @@ module cpu_registers_write_mux(input clock, enable, input [4:0] s, input [255:0]
 				5'd13: cpu_registers[47:32] = in[255:240];
 				5'd14: cpu_registers[31:16] = in[255:240];
 				5'd15: cpu_registers[15:0] = in[255:240];
-				5'd16: cpu_registers = in;
+				5'd16: cpu_registers[255:16] = in[255:16];
 				default: cpu_registers[255:240] = in[255:240];
 			endcase
 		end
@@ -694,46 +724,79 @@ module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:
 	wire [0:47]  pixels;
 	reg [7:0] chars;
 	reg [1:0] count = 0;
-   char_to_pixels u0(chars, pixels);
+	reg resetting = 0;
+	reg started = 0;
 	reg [4:0] i = 5'd31;
    // Data path
-	reg [5:0] counter = 0;
+	reg [16:0] counterX = 0;
+	reg [9:0] counterY = 0;
+   char_to_pixels u0(chars, pixels);
+
+
 	integer k;
    always@(posedge clock) begin
-		if (start) begin
-			if (count == 0)
+		if (resetting) begin
+			counterX <= counterX + 1'b1;
+			if(counterX == 9'd319) begin
+				if(counterY == 9'd239) begin
+					resetting <= 0;
+					counterX <= 0;
+					counterY <= 0;
+				end else begin
+					counterY <= counterY + 1'b1;
+					counterX <= 0;
+				end
+			end
+			draw_en <= 1;
+			x <= counterX;
+			y <= counterY;
+			colour <= 0;
+		end
+		else if (!reset_n) begin
+			resetting <= 1'b1;
+		end
+		else if (start) begin
+			if (!started) begin
 				chars[7:0] = char_code[31:24];
-			if (!done) begin
-				if (counter == 6'd47) begin
-					if (count == num_chars)
-						done <= 1;
-					else begin
-						count <= count + 1;
-						i = 31 - ((count + 1) * 8);
-						counter <= 0;
-						for (k = 0; k < 8; k = k + 1)
-							chars[7 - k] = char_code[i - k];
-						
+				started <= 1'b1;
+			end else if (!done) begin
+				counterX <= counterX + 1'b1;
+				if (counterX == 9'd5) begin
+					if (counterY == 9'd7) begin
+						counterX <= 0;
+						counterY <= 0;
+						if (count == num_chars) begin
+							done <= 1;
+							started <= 0;
+						end
+						else begin
+							count <= count + 1'b1;
+							i = 5'd31 - ((count + 1'b1) * 4'd8);
+							for (k = 0; k < 8; k = k + 1)
+								chars[7 - k] = char_code[i - k];
+						end
+					end else begin
+						counterY <= counterY + 1'b1;
+						counterX <= 0;
 					end
 				end
-				i = 31 - (count * 8);
-				for (k = 0; k < 8; k = k + 1)
-					chars[7 - k] = char_code[i - k];
 				draw_en <= 1;
-				x <= (X + count) * 6 + (counter % 6);
-				y <= Y * 8 + (counter / 6);
-				colour <= pixels[counter];
-				counter <= counter + 1;
+				x <= ((X + count) * 3'd6) + counterX;
+				y <= (Y * 4'd8) + counterY;
+				colour <= pixels[((6 * counterY) + counterX)];
 			end
 		end 
 		else begin
+			started <= 0;
+			resetting <= 0;
 			draw_en <= 0;
-			counter <= 0;
+			counterX <= 0;
+			counterY <= 0;
 			count <= 0;
 			done <= 0;
 			i = 5'd31;
 			for (k = 0; k < 8; k = k + 1)
-					chars[7 - k] = char_code[i - k];
+					chars[7 - k] <= char_code[i - k];
 		end
 	end
  endmodule

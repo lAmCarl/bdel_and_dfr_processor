@@ -53,6 +53,11 @@ module project_tb(PS2_CLK, PS2_DAT); // no I/O ports, this is a testbench file
 		
 		#20
 		KEY = 3'b111;
+		
+		#100
+		KEY = 3'b110;
+		#20
+		KEY = 3'b111;
 
 		
 		
