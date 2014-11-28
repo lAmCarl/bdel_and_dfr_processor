@@ -9,8 +9,8 @@ module playground
 		output	[9:0] VGA_R, VGA_G, VGA_B,
 		output[6:0] HEX0, HEX1, HEX2, HEX3,
 		inout		PS2_CLK, PS2_DAT
-		//,input key_pressed,
-		//input [7:0] keycode	
+		,input key_pressed,
+		input [7:0] keycode	
 		);
 		
 	assign LEDG[7:3] = { 5{ 1'd0 } };
@@ -30,6 +30,7 @@ module playground
 		end 
 		else wasreset <= 1;
 	end
+	
 	
 	wire clock, reset_n;
 	wire nike;
@@ -91,7 +92,8 @@ module playground
 		, OP_MOD = 8'd33
 		, OP_INTERRUPT = 8'd34
 		, OP_UNINTERRUPT = 8'd35
-		, OP_HR_RESET = 8'd36;
+		, OP_HR_RESET = 8'd36
+		, OP_KEY_COUNT = 8'd37;
 
 	// Output LED
 	// Use: led_output_in, led_output_write_enable
@@ -111,13 +113,13 @@ module playground
 	reg [8:0] draw_X = 0; //lowercase for location of pixel, uppercase for location of character's top-left pixel
 	wire [7:0] draw_y;
 	reg [7:0] draw_Y = 0;
-	reg [31:0] char_code = 0;
-	reg [1:0] num_chars = 0;
+	reg [39:0] char_code = 0;
+	reg [2:0] num_chars = 0;
 	wire draw_colour, draw_en;
 	reg vga_draw_start = 0;
 	wire vga_draw_done;
 	vga_draw_character u1(clock, vga_draw_start, reset_n, draw_X, draw_Y, char_code, num_chars, draw_en, vga_draw_done, draw_colour, draw_x, draw_y);
-	vga_adapter VGA(
+	/*vga_adapter VGA(
 		.resetn(reset_n),
 		.clock(CLOCK_50),
 		.colour(draw_colour),
@@ -137,14 +139,52 @@ module playground
 	defparam VGA.MONOCHROME = "TRUE";
 	defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
 	defparam VGA.BACKGROUND_IMAGE = "background.mif";
+	*/
+	//module interrupt_handler (input clock, resetn, interrupt_done, interrupt_received, timer_interrupt, keyboard_interrupt, output reg interrupt_high, output reg [1:0] interrupt_code);
+	//Interrupt
+	reg keyboard_interrupt = 0, timer_interrupt = 0, interrupt_received = 0, interrupt_done = 0;
+	wire[1:0] interrupt_code;
+	wire interrupt_high;
+	reg[15:0]interrupt_jumpcode[0:3];
+	integer k;
+	initial begin
+		for (k = 0; k < 4; k = k + 1) begin
+			interrupt_jumpcode[k] = 16'b0;
+		end
+	end
+	interrupt_handler ih(clock, reset_n, interrupt_done, interrupt_received, timer_interrupt, keyboard_interrupt, interrupt_high, interrupt_code);
+	
+	//Timer_interrupt
+	reg[32:0] counter = 33'd50000;
+	wire pulse;
+	timer timer1(clock, reset_n, program_running, counter, pulse);
+	always@(posedge clock)begin
+		timer_interrupt <= 0;
+		if (pulse) begin
+			if (interrupt_jumpcode[2'd0] != 0) begin
+				timer_interrupt <= 1'b1;
+			end
+		end
+	end
 	
 	// Input keyboard
-	wire key_pressed;
-	wire [7:0] keycode;
+	//wire key_pressed;
+	reg[15:0] keycount = 0;
+	//wire [7:0] keycode;
 	reg [15:0] key_int;
 
-	keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
+	//keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
 	//keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode, received_data, received_data_en);
+	
+	always@(posedge clock)begin
+		keyboard_interrupt <= 0;
+		if (key_pressed) begin
+			if (interrupt_jumpcode[2'd1] != 0) begin
+				keyboard_interrupt <= 1'b1;
+			end
+		end
+	end
+	
 	
 	// Input fpga
 	wire [15:0] input_fpga_out;
@@ -161,7 +201,8 @@ module playground
 
 	// CPU registers
 	// Use: cpu_registers_<read>_<a|b|c>, cpu_registers_write, cpu_registers_write_enable, cpu_registers_write_index
-	wire [255:0] cpu_registers, save_registers;
+	wire [255:0] cpu_registers;
+	reg [255:0] save_registers;
 	reg cpu_registers_write_enable;
 	reg [7:0] cpu_registers_write_index;
 
@@ -280,7 +321,7 @@ module playground
 	
 	
 	reg[10:0] count = 0;
-	reg[31:0] display_int = { 8'd36, 8'd36, 8'd36, 8'd36 };
+	reg[39:0] display_int = { 8'd36, 8'd36, 8'd36, 8'd36, 8'd36 };
 	integer i;
 	always@(posedge clock) begin
 		cpu_registers_write_enable = 0;
@@ -290,7 +331,7 @@ module playground
 		input_fpga_waiting = 0;
 		cpu_registers_write = 0;
 		cpu_registers_write_index = 0;
-		//interrupt_received = 0;
+		interrupt_done = 0;
 
 
 		input_fpga_returned_prev_value <= input_fpga_returned;
@@ -313,6 +354,13 @@ module playground
 			heap_reset_start <= 0;
 			vga_draw_start <= 0;
 			count <= 0;
+			keycount <= 0;
+			save_registers <= 0;
+			save_pc <= 0;
+			for (k = 0; k < 4; k = k + 1)
+				interrupt_jumpcode[k] = 16'b0;
+			interrupt_received <= 0;
+			interrupt_done <= 0;
 			display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
 			unknown_command <= 0;
 		end else begin
@@ -324,15 +372,18 @@ module playground
 					idle <= 0;
 					read_instruction_start <= 1;
 				end
-			/*end else if (interrupt_high && !interrupt_received) begin
-				interrupt_received <= 1;
-				save_registers <= cpu_registers;
-				save_pc <= pc;
-				pc <= interrupt_pc;
-				read_instruction_start <= 1;*/
 			end else if (read_instruction_start) begin // read instruction state
-				if (read_instruction_done) begin
-					read_instruction_start <= 0;
+				if (interrupt_high && !interrupt_received) begin
+						interrupt_received <= 1;
+						save_registers <= cpu_registers;
+						save_pc <= pc;
+						pc <= interrupt_jumpcode[interrupt_code];
+						count <= 1'd1;
+				end else if (read_instruction_done) begin
+					if (count == 1'd1)
+						count <= 0;
+					else
+						read_instruction_start <= 0;
 				end
 			end else begin // operate state
 				case (opcode)
@@ -505,7 +556,7 @@ module playground
 							end
 						end else begin
 							char_code <= { 4'b0, cpu_registers_read_a[15:12], 4'b0, cpu_registers_read_a[11:8], 
-								4'b0, cpu_registers_read_a[7:4], 4'b0, cpu_registers_read_a[3:0] };
+								4'b0, cpu_registers_read_a[7:4], 4'b0, cpu_registers_read_a[3:0], 8'd36 };
 							draw_X <= cpu_registers_read_b[8:0];
 							draw_Y <= cpu_registers_read_c[7:0];
 							num_chars <= 2'd3;
@@ -515,10 +566,8 @@ module playground
 					OP_PRINTDEC: begin
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
-								if (count == 25) begin
-									pc <= pc + 16'd1;
-									read_instruction_start <= 1;
-								end
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
 								vga_draw_start <= 0;
 							end
 						end else begin
@@ -526,24 +575,29 @@ module playground
 							if (count == 0) begin
 								numer <= cpu_registers_read_a;
 								denom <= 16'd10;
-							end else if (count == 6) begin
-								char_code[7:0] <= do_math_mod;
+							end else if (count == 7) begin
+								char_code[7:0] <= do_math_mod[8:0];
 								numer <= do_math_div;
 								denom <= 16'd10;
-							end else if (count == 12) begin
-								char_code[15:8] <= do_math_mod;
+							end else if (count == 14) begin
+								char_code[15:8] <= do_math_mod[8:0];
 								numer <= do_math_div;
 								denom <= 16'd10;
-							end else if (count == 18) begin
-								char_code[23:16] <= do_math_mod;
+							end else if (count == 21) begin
+								char_code[23:16] <= do_math_mod[8:0];
 								numer <= do_math_div;
 								denom <= 16'd10;
-							end else if (count == 24) begin
-								char_code[31:24] <= do_math_mod;
+							end else if (count == 28) begin
+								char_code[31:24] <= do_math_mod[8:0];
+								numer <= do_math_div;
+								denom <= 16'd10;
+							end else if (count == 35) begin
+								char_code[39:32] <= do_math_mod[8:0];
 								draw_X <= cpu_registers_read_b[8:0];
 								draw_Y <= cpu_registers_read_c[7:0];
-								num_chars <= 2'd3;
-								vga_draw_start <= 1;
+								num_chars <= 3'd4;
+								count <= 0;
+								vga_draw_start <= 1'b1;
 							end
 						end
 					end
@@ -555,7 +609,7 @@ module playground
 								read_instruction_start <= 1;
 							end
 						end else begin
-							char_code <= { cpu_registers_read_a[7:0], 24'b0 };
+							char_code <= { cpu_registers_read_a[7:0], 32'b0 };
 							draw_X <= cpu_registers_read_b[8:0];
 							draw_Y <= cpu_registers_read_c[7:0];
 							num_chars <= 0;
@@ -564,18 +618,21 @@ module playground
 					end
 					OP_KEYBOARD: begin
 						if (key_pressed) begin
-							//if (keycode != 8'd255)
-							//	if (keycode < 8'd36)
-							char_code <= { keycode, 24'b0 };
-							draw_X <= cpu_registers_read_a[8:0];
-							draw_Y <= cpu_registers_read_b[7:0];
-							num_chars <= 0;
-							vga_draw_start <= 1;
-							cpu_registers_write = { 8'b0, keycode, 240'bx };
-							cpu_registers_write_index = instr_c;
-							cpu_registers_write_enable = 1;
-							pc <= pc + 16'd1;
-							read_instruction_start <= 1;
+							if (keycode != 8'd255) begin
+								//	if (keycode < 8'd36)
+								char_code <= { keycode, 32'b0 };
+								if (cpu_registers_read_a != -1) begin
+									draw_X <= cpu_registers_read_a[8:0];
+									draw_Y <= cpu_registers_read_b[7:0];
+									num_chars <= 0;
+									vga_draw_start <= 1;
+								end
+								cpu_registers_write = { 8'b0, keycode, 240'bx };
+								cpu_registers_write_index = instr_c;
+								cpu_registers_write_enable = 1;
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
+							end
 						end
 					end
 					OP_KEYHEX: begin
@@ -584,34 +641,67 @@ module playground
 							if (vga_draw_done) begin
 								vga_draw_start <= 0;
 							end
-						end else if (key_pressed) begin
+						end else if (key_pressed || count == 4'd5) begin
 							if (keycode != 8'd255) begin
 								if (keycode == 8'd98) begin
-									cpu_registers_write <= { key_int, 240'bx };
-									cpu_registers_write_index <= instr_c;
-									cpu_registers_write_enable <= 1;
-									display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
-									key_int <= 0;
-									count <= 0;
-									pc <= pc + 16'd1;
-									input_fpga_waiting = 0;
-									read_instruction_start <= 1;
+									if (display_int == { 8'd36, 8'd36, 8'd36, 8'd36, 8'd36 }) begin
+										char_code <= {8'b0, display_int[31:0]};
+										display_int[39:32] <= 8'b0;
+										draw_X <= cpu_registers_read_a[8:0];
+										draw_Y <= cpu_registers_read_b[7:0];
+										num_chars <= 1'b1;
+										keycount <= 1'd1;
+										vga_draw_start <= 1;
+										count <= 4'd5;
+									end else begin
+										cpu_registers_write <= { key_int, 240'bx };
+										cpu_registers_write_index <= instr_c;
+										cpu_registers_write_enable <= 1;
+										display_int <= { 8'd36, 8'd36, 8'd36, 8'd36, 8'd36 };
+										key_int <= 0;
+										count <= 0;
+										pc <= pc + 16'd1;
+										input_fpga_waiting = 0;
+										read_instruction_start <= 1;
+									end
 								end else if (keycode < 8'd16)begin
 									if(count != 4) begin
 										key_int = key_int << 4;
 										key_int[3:0] = keycode [3:0];
-										display_int[31:24] = { 4'b0, key_int [15:12] };
-										display_int[23:16] = { 4'b0, key_int [11:8] };
-										display_int[15:8] = { 4'b0, key_int [7:4] };
-										display_int[7:0] = {4'b0, key_int [3:0] };
+										display_int[39:32] = { 4'b0, key_int [15:12] };
+										display_int[31:24] = { 4'b0, key_int [11:8] };
+										display_int[23:16] = { 4'b0, key_int [7:4] };
+										display_int[15:8] = {4'b0, key_int [3:0] };
+										display_int[7:0] = {8'd36};
 										for (i = 0; i < (2'd3 - count) && i < 2'd3; i = i + 1)
 											display_int = display_int << 8;
 										char_code = { display_int };
 										draw_X <= cpu_registers_read_a[8:0];
 										draw_Y <= cpu_registers_read_b[7:0];
 										num_chars <= count;
-										vga_draw_start <= 1;
-										count <= count + 1;
+										vga_draw_start <= 1'b1;
+										count <= count + 1'b1;
+										keycount <= count + 1'b1;
+									end
+								end else if (keycode == 8'd37) begin
+									if (count > 0) begin
+										key_int <= key_int >> 4;
+										display_int[39:32] = { 8'b0 };
+										display_int[31:24] = { 4'b0, key_int [15:12] };
+										display_int[23:16] = { 4'b0, key_int [11:8] };
+										display_int[15:8] = {4'b0, key_int [7:4] };
+										display_int[7:0] = 8'd36;
+										for (i = 0; i < (2'd3 - count + 2'd2) && i < 2'd3; i = i + 1) begin
+											display_int = display_int << 8;
+											display_int[7:0] = 8'd36;
+										end
+										char_code = { display_int };
+										draw_X <= cpu_registers_read_a[8:0];
+										draw_Y <= cpu_registers_read_b[7:0];
+										num_chars <= count - 1'b1;
+										vga_draw_start <= 1'b1;
+										count <= count - 1'b1;
+										keycount <= count - 1'b1;
 									end
 								end
 							end
@@ -623,27 +713,49 @@ module playground
 							if (vga_draw_done) begin
 								vga_draw_start <= 0;
 							end
-						end else if (key_pressed) begin
+						end else if (key_pressed || count == 3'd6) begin
 							if (keycode != 8'd255) begin
 								if (keycode == 8'd98) begin
+									if (display_int == { 8'd36, 8'd36, 8'd36, 8'd36, 8'd36 }) begin
+										char_code <= {8'b0, 8'd36, 8'd36, 8'd36, 8'd36};
+										display_int[39:32] = 8'b0;
+										num_chars <= 1'b1;
+										draw_X <= cpu_registers_read_a[8:0];
+										draw_Y <= cpu_registers_read_b[7:0];
+										vga_draw_start <= 1'b1;
+										count <= 3'd6;
+										keycount <= 1'b1;
+									end
 									cpu_registers_write <= { key_int, 240'bx };
 									cpu_registers_write_index <= instr_c;
 									cpu_registers_write_enable <= 1'b1;
-									display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
+									display_int <= { 8'd36, 8'd36, 8'd36, 8'd36, 8'd36 };
 									key_int <= 0;
 									count <= 0;
 									pc <= pc + 16'd1;
 									input_fpga_waiting = 0;
 									read_instruction_start <= 1'b1;
 								end else if (keycode < 8'd10)begin
-									if(count != 3'd4) begin
+									if(count != 3'd5) begin
 										key_int <= (key_int * 4'd10) + keycode;
-										char_code <= { keycode, 24'b0 };
+										char_code <= { keycode, 32'b0 };
 										draw_X <= cpu_registers_read_a[8:0] + count;
 										draw_Y <= cpu_registers_read_b[7:0];
 										num_chars <= 1'b1;
 										vga_draw_start <= 1'b1;
 										count <= count + 1'b1;
+										keycount <= count + 1'b1;
+									end
+								end else if (keycode == 8'd37) begin
+									if (count > 0) begin
+										key_int <= key_int / 5'd10;
+										char_code <= {8'd36, 32'd0};
+										draw_X <= cpu_registers_read_a[8:0] + count - 1'b1;
+										draw_Y <= cpu_registers_read_b[7:0];
+										num_chars <= 0;
+										vga_draw_start <= 1'b1;
+										count <= count - 1'b1;
+										keycount <= count - 1'b1;
 									end
 								end
 							end
@@ -760,14 +872,17 @@ module playground
 						read_instruction_start <= 1;
 					end
 					OP_INTERRUPT: begin
-						//interrupt_code[instr_a] <= instr_b;
+						interrupt_jumpcode[instr_a[1:0]] <= cpu_registers_read_b;
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
 					OP_UNINTERRUPT: begin
 						pc <= save_pc;
-						//cpu_registers <= save_registers;
-						//interrupt_done <= 1;
+						cpu_registers_write <= save_registers;
+						cpu_registers_write_index <= 5'd17;
+						cpu_registers_write_enable <= 1;
+						interrupt_received <= 0;
+						interrupt_done <= 1;
 						read_instruction_start <= 1;
 					end
 					OP_HR_RESET: begin
@@ -779,6 +894,13 @@ module playground
 							end
 						end
 						heap_reset_start <= 1;
+					end
+					OP_KEY_COUNT: begin
+						cpu_registers_write <= { keycount, 240'bx };
+						cpu_registers_write_index <= instr_a;
+						cpu_registers_write_enable <= 1'b1;
+						pc <= pc + 1'b1;
+						read_instruction_start <= 1'b1;
 					end
 					OP_EOF: begin
 						program_done <= 1;
@@ -814,6 +936,8 @@ module instruction_ram_read(input clock, start, input [31:0] ram_data, output re
 					q <= ram_data;
 					done <= 1;
 				end
+			end else begin
+				done <= 0;
 			end
 		end else begin
 			done <= 0;
@@ -988,21 +1112,73 @@ module cpu_registers_write_mux(input clock, enable, input [4:0] s, input [255:0]
 				5'd14: cpu_registers[31:16] = in[255:240];
 				5'd15: cpu_registers[15:0] = in[255:240];
 				5'd16: cpu_registers[255:16] = in[255:16];
+				5'd17: cpu_registers = in;
 				default: cpu_registers[255:240] = in[255:240];
 			endcase
 		end
 	end
 endmodule
 
-//module interrupt_handler (input clock, resetn,  );
+module interrupt_handler (input clock, resetn, interrupt_done, interrupt_received, timer_interrupt, keyboard_interrupt, output reg interrupt_high, output reg [1:0] interrupt_code);
+	reg timer_received = 0, key_received = 0;
+	always@(posedge clock) begin
+		if (!resetn) begin
+			timer_received <= 0;
+			key_received <= 0;
+			interrupt_high <= 0;
+			interrupt_code <= 0;
+		end else if (timer_interrupt || timer_received) begin
+			timer_received <= 1;
+			interrupt_high <= 1;
+			interrupt_code <= 2'd0;
+			if (interrupt_received)
+				interrupt_high <= 0;
+			if (interrupt_done) begin
+				interrupt_high <= 0;
+				timer_received <= 0;
+			end
+		end else if (keyboard_interrupt || key_received) begin
+			key_received <= 1;
+			interrupt_high <= 1;
+			interrupt_code <= 2'd1;
+			if (interrupt_received)
+				interrupt_high <= 0;
+			if (interrupt_done) begin
+				interrupt_high <= 0;
+				key_received <= 0;
+			end
+		end else begin
+			interrupt_high <= 0;
+			interrupt_code <= 0;
+		end
+	end
+endmodule
 
-module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:0] Y, input [31:0] char_code, input [1:0] num_chars, output reg draw_en, done, colour, output reg [8:0] x, output reg [7:0] y);
+module timer (input clock, reset_n, enable, input [32:0]counter, output reg pulse);
+	reg[32:0] count = 0;
+	always@(posedge clock)
+		if(!reset_n) begin
+			count <= 0;
+			pulse <= 0;
+			
+		end else if (count == counter) begin
+			pulse <= 1'b1;
+			count <= 0;
+		end else if (enable) begin
+			count <= count + 1'b1;
+			pulse <= 0;
+		end
+endmodule
+			
+
+
+module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:0] Y, input [39:0] char_code, input [2:0] num_chars, output reg draw_en, done, colour, output reg [8:0] x, output reg [7:0] y);
 	wire [0:47]  pixels;
 	reg [7:0] chars;
-	reg [1:0] count = 0;
+	reg [3:0] count = 0;
 	reg resetting = 0;
 	reg started = 0;
-	reg [4:0] i = 5'd31;
+	reg [5:0] i = 6'd39;
    // Data path
 	reg [16:0] counterX = 0;
 	reg [9:0] counterY = 0;
@@ -1033,7 +1209,7 @@ module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:
 		end
 		else if (start) begin
 			if (!started) begin
-				chars[7:0] = char_code[31:24];
+				chars[7:0] = char_code[39:32];
 				started <= 1'b1;
 			end else if (!done) begin
 				counterX <= counterX + 1'b1;
@@ -1047,7 +1223,7 @@ module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:
 						end
 						else begin
 							count <= count + 1'b1;
-							i = 5'd31 - ((count + 1'b1) * 4'd8);
+							i = 6'd39 - ((count + 1'b1) * 4'd8);
 							for (k = 0; k < 8; k = k + 1)
 								chars[7 - k] = char_code[i - k];
 						end
@@ -1070,7 +1246,7 @@ module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:
 			counterY <= 0;
 			count <= 0;
 			done <= 0;
-			i = 5'd31;
+			i = 6'd39;
 			for (k = 0; k < 8; k = k + 1)
 					chars[7 - k] <= char_code[i - k];
 		end
