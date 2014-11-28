@@ -4,7 +4,7 @@ exit main();
 
 sub main {
 	my $width = 32;
-	my $depth = 2048;
+	my $depth = 4096;
 
 	print "WIDTH=$width;\n";
 	print "DEPTH=$depth;\n";
@@ -24,5 +24,5 @@ sub nike {
 		$i++;
 	}
 	my $end = $_[1] - 1;
-	print "\t[$i..$end]: " . ('0' x ($_[0] / 4 * 2)) . ";\n";
+	print "\t[$i..$end]: " . ('0' x ($_[0] / 8 * 2)) . ";\n";
 }
