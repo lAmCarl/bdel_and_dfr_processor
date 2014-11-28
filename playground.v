@@ -4,68 +4,107 @@ module playground
 		input 	[2:0] KEY, 
 		input 	[15:0] SW, 
 		output 	[7:0] LEDG, 
-		output 	[17:0] LEDR, 
+		output [17:0] LEDR, 
 		output 	VGA_CLK, VGA_BLANK, VGA_HS, VGA_VS, VGA_SYNC, 
 		output	[9:0] VGA_R, VGA_G, VGA_B,
-		inout		PS2_CLK, PS2_DAT);
+		output[6:0] HEX0, HEX1, HEX2, HEX3,
+		inout		PS2_CLK, PS2_DAT
+		//,input key_pressed,
+		//input [7:0] keycode	
+		);
 		
 	assign LEDG[7:3] = { 5{ 1'd0 } };
-	assign LEDR[16] = 0;
 
-	reg signed [15:0] pc = 0, sp = 0;
+	reg signed [15:0] pc = 0, sp = 0, save_pc;
 	reg read_instruction_start = 0;
 	wire read_instruction_done;
 	reg idle = 1;
+		
+
+	reg wasreset = 1;
+	always@(posedge CLOCK_50) begin
+		if (key_pressed) begin
+			if(keycode == 8'd39)
+				wasreset <= 0;
+			else wasreset <= 1;
+		end 
+		else wasreset <= 1;
+	end
 	
 	wire clock, reset_n;
 	wire nike;
-	
-	assign nike = ~KEY[1];
+	assign nike = (~KEY[1] || (key_pressed && keycode == 8'd28));
 	assign clock = CLOCK_50;
-	assign reset_n = KEY[0];
+	assign reset_n = (KEY[0] && (wasreset));
 	
-	wire [63:0] instruction;
-	wire signed [15:0] opcode, instr_a, instr_b, instr_c;
+	wire [31:0] instruction;
+	wire signed [7:0] opcode, instr_a, instr_b, instr_c;
 	assign { opcode, instr_a, instr_b, instr_c } = instruction;
+	reg unknown_command = 0;
+	reg program_running = 0;
+	reg heap_segfault = 0;
+	reg stack_read_start = 0, stack_write_start = 0, segfault1 = 0, segfault2 = 0;
+	wire program_error = segfault1 | segfault2 | unknown_command | heap_segfault;
+	reg program_done;
 
-	reg program_running, program_done, program_error;
 	assign LEDG[0] = program_running;
 	assign LEDG[1] = program_done;
+	assign LEDR[1] = segfault1 | segfault2;
+	assign LEDR[2] = heap_segfault;
+	assign LEDR[0] = unknown_command;
 	assign LEDR[17] = program_error;
 
 	parameter
-		  OP_EOF = 16'd0
-		, OP_LOAD = 16'd1 // <
-		, OP_STORE = 16'd2
-		, OP_LITERAL = 16'd3
-		, OP_INPUT = 16'd4
-		, OP_OUTPUT = 16'd5
-		, OP_ADD = 16'd6
-		, OP_SUB = 16'd7
-		, OP_MUL = 16'd8
-		, OP_DIV = 16'd9
-		, OP_CMP = 16'd10
-		, OP_BRANCH = 16'd11
-		, OP_JUMP = 16'd12
-		, OP_STACK = 16'd13
-		, OP_SUPERMANDIVE = 16'd14
-		, OP_GETUP = 16'd15
-		, OP_PRINTINT = 16'd16 // opcodes including and after 16 should later be system functions
-		, OP_DRAW = 16'd17 // <char_code> <x> <y>
-		, OP_KEYBOARD = 16'd18
-		, OP_HEAP = 16'd19
-		, OP_UNHEAP = 16'd20
-		, OP_KEYINT = 16'd21
-		, OP_PRINTHEX = 16'd22
-		, OP_INC = 16'd23
-		, OP_DEC = 16'd24
-		, OP_MOV = 16'd25;
+		  OP_EOF = 8'd0
+		, OP_LOAD = 8'd1 // <
+		, OP_STORE = 8'd2
+		, OP_LITERAL = 8'd3
+		, OP_INPUT = 8'd4
+		, OP_OUTPUT = 8'd5
+		, OP_ADD = 8'd6
+		, OP_SUB = 8'd7
+		, OP_MUL = 8'd8
+		, OP_DIV = 8'd9
+		, OP_KEYDEC = 8'd10
+		, OP_BRANCH = 8'd11
+		, OP_JUMP = 8'd12
+		, OP_STACK = 8'd13
+		, OP_SUPERMANDIVE = 8'd14
+		, OP_GETUP = 8'd15
+		, OP_PRINTDEC = 8'd16 // opcodes including and after 16 should later be system functions
+		, OP_DRAW = 8'd17 // <char_code> <x> <y>
+		, OP_KEYBOARD = 8'd18
+		, OP_HEAP = 8'd19
+		, OP_UNHEAP = 8'd20
+		, OP_KEYHEX = 8'd21
+		, OP_PRINTHEX = 8'd22
+		, OP_INC = 8'd23
+		, OP_DEC = 8'd24
+		, OP_MOV = 8'd25
+		, OP_NOT = 8'd26
+		, OP_OR = 8'd27
+		, OP_AND = 8'd28
+		, OP_EQ = 8'd29
+		, OP_LT = 8'd30
+		, OP_GT = 8'd31
+		, OP_RAND = 8'd32
+		, OP_MOD = 8'd33
+		, OP_INTERRUPT = 8'd34
+		, OP_UNINTERRUPT = 8'd35
+		, OP_HR_RESET = 8'd36;
 
 	// Output LED
 	// Use: led_output_in, led_output_write_enable
 	reg [15:0] led_output_in = 0;
 	reg led_output_write_enable = 0;
-	led_output_dffr u0(clock, led_output_write_enable, reset_n, led_output_in, LEDR[15:0]);
+	wire [15:0]out;
+	led_output_dffr u0(clock, led_output_write_enable, reset_n, led_output_in, out);
+
+	sevsegDecoder h0(out[3:0], HEX0);
+	sevsegDecoder h1(out[7:4], HEX1);
+	sevsegDecoder h2(out[11:8], HEX2);
+	sevsegDecoder h3(out[15:12], HEX3);
+	
 	
 	// Output VGA	
 	wire[8:0] draw_x;
@@ -82,8 +121,8 @@ module playground
 		.resetn(reset_n),
 		.clock(CLOCK_50),
 		.colour(draw_colour),
-		.x(draw_x),
-		.y(draw_y),
+		.x(draw_x + 3'd3),
+		.y(draw_y + 5'd14),
 		.plot(draw_en),
 		// Signals for the DAC to drive the monitor. 
 		.VGA_R(VGA_R),
@@ -103,8 +142,10 @@ module playground
 	wire key_pressed;
 	wire [7:0] keycode;
 	reg [15:0] key_int;
-	keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
 
+	keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
+	//keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode, received_data, received_data_en);
+	
 	// Input fpga
 	wire [15:0] input_fpga_out;
 	wire input_fpga_returned;
@@ -113,12 +154,16 @@ module playground
 	assign input_fpga_out = SW[15:0];
 	assign input_fpga_returned = ~KEY[2];
 	assign LEDG[2] = input_fpga_waiting;
+	
+	//RNG
+	wire [15:0] randnum;
+	random rand1(randnum, clock);
 
 	// CPU registers
 	// Use: cpu_registers_<read>_<a|b|c>, cpu_registers_write, cpu_registers_write_enable, cpu_registers_write_index
-	wire [255:0] cpu_registers;
+	wire [255:0] cpu_registers, save_registers;
 	reg cpu_registers_write_enable;
-	reg [15:0] cpu_registers_write_index;
+	reg [7:0] cpu_registers_write_index;
 
 	wire signed [15:0] cpu_registers_read_a, cpu_registers_read_b, cpu_registers_read_c;
 	cpu_registers_read_mux u2(instr_a[3:0], cpu_registers, cpu_registers_read_a);
@@ -133,60 +178,106 @@ module playground
 	wire [255:0] stack_read;
 	reg [255:0] stack_write = 0;
 	reg [15:0] stack_address = 0, stack_words = 0;
-	reg stack_read_start = 0, stack_write_start = 0;
+
 	wire [15:0] stack_write_values, stack_read_values, read_address, write_address; 
 	reg [11:0] stack_address_real = 0;
-	wire stack_read_done, stack_write_done;
+	wire stack_read_done, stack_write_done, stack_write_go;
 	stack_ram_read u8(clock, stack_read_start, stack_read_values, stack_address, stack_words, stack_read, read_address, stack_read_done);
-	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, write_address, stack_write_done);
-	always@(*)
-		if(stack_write_start)
-			stack_address_real = write_address;
-		else
+	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, write_address, stack_write_done, stack_write_go);
+	always@(*) begin
+		segfault1 = 0;
+		segfault2 = 0;
+		stack_address_real = read_address;
+		if(stack_write_start) begin
+			if (write_address > 16'd2047) begin
+				segfault1 = 1;
+			end else begin
+				stack_address_real = write_address;
+			end
+		end else if (stack_read_start) begin
+			if ((read_address > 16'd3) && ((read_address - 16'd2) > 16'd2047)) begin
+				segfault2 = 1;
+			end else begin
+				stack_address_real = read_address;
+			end
+		end else begin
+			segfault1 = 0;
+			segfault2 = 0;
 			stack_address_real = read_address;
+		end
+	end
 	
 	stack_ram u11(
 			.address(stack_address_real),
 			.clock(clock),
 			.data(stack_write_values),
-			.wren((stack_write_start)),
+			.wren(stack_write_go),
 			.q(stack_read_values));
 			
 	//Heap
-	reg [11:0] heap_address = 0;
-	wire heap_read_done;
+	reg [11:0] heap_address_real = 0, heap_address_read = 0, heap_address = 0;
+	wire heap_read_done, heap_write_done, heap_write_enable;
 	reg heap_read_start = 0;
-	reg heap_write_start = 0, heap_write_enable = 0;
-	reg [15:0] heap_write_values;
-	wire [15:0] heap_read, heap_read_values;
-	
+	reg heap_write_start = 0, heap_reset_start = 0;
+	reg [15:0] heap_write = 0;
+	wire [15:0] heap_read, heap_read_values, heap_write_values, heap_address_write;
+	//module heap_ram_write(input clock, start, resetn, heap_reset, input [15:0] address, input [15:0] data, output reg heap_write_enable, output reg[15:0] stuff_to_write, real_address, output reg done);
 	heap_ram_read u6(clock, heap_read_start, heap_read, heap_read_values, heap_read_done);
-	
+	heap_ram_write u7(clock, heap_write_start, reset_n, heap_reset_start, heap_address, heap_write, heap_write_enable, heap_write_values, heap_address_write, heap_write_done);
 	heap_ram u13(
-			.address(heap_address),
+			.address(heap_address_real),
 			.clock(clock),
 			.data(heap_write_values),
 			.wren(heap_write_enable),
 			.q(heap_read));
 
+	always@(*) begin
+		heap_segfault = 0;
+		heap_address_real = heap_address_read;
+		if(heap_write_start || heap_write_enable) begin
+			if (heap_address_write > 16'd1023) begin
+				heap_segfault = 1;
+			end else begin
+				heap_address_real = heap_address_write;
+			end
+		end else if (heap_read_start) begin
+			if (heap_address_read > 16'd1023) begin
+				heap_segfault = 1;
+			end else begin
+				heap_address_real = heap_address_read;
+			end
+		end
+	end		
+			
 	// Read instruction
-	wire [63:0] instr_read_values;
+	wire [31:0] instr_read_values;
 	instruction_ram_read u10(clock, read_instruction_start, instr_read_values, instruction, read_instruction_done);
 
 	instruction_ram u12(
-			.address(pc[9:0]),
+			.address(pc),
 			.clock(clock),
-			.data(64'bx),
+			.data(32'bx),
 			.wren(1'b0),
 			.q(instr_read_values));
 	
-	wire [15:0] do_math_add, do_math_sub, do_math_mul, do_math_div, do_math_inc, do_math_dec;
+	wire signed[15:0] do_math_add, do_math_sub, do_math_mul, do_math_div, do_math_mod, do_math_inc, do_math_dec;
 	assign do_math_add = cpu_registers_read_a + cpu_registers_read_b;
 	assign do_math_sub = cpu_registers_read_a - cpu_registers_read_b;
 	assign do_math_mul = cpu_registers_read_a * cpu_registers_read_b;
-	assign do_math_div = cpu_registers_read_a / cpu_registers_read_b;
+	//assign do_math_div = cpu_registers_read_a / cpu_registers_read_b;
 	assign do_math_inc = cpu_registers_read_a + 16'b1;
 	assign do_math_dec = cpu_registers_read_a - 16'b1;
+	
+	//divider megafunction
+	reg signed[15:0] denom = 1;
+	reg signed[15:0] numer = 0;
+	divider divide(
+	.clock(clock),
+	.denom(denom),
+	.numer(numer),
+	.quotient(do_math_div),
+	.remain(do_math_mod));
+	
 	
 	reg[10:0] count = 0;
 	reg[31:0] display_int = { 8'd36, 8'd36, 8'd36, 8'd36 };
@@ -196,14 +287,15 @@ module playground
 		led_output_write_enable = 0;
 		program_running = 1;
 		program_done = 0;
-		program_error = 0;
 		input_fpga_waiting = 0;
 		cpu_registers_write = 0;
 		cpu_registers_write_index = 0;
+		//interrupt_received = 0;
+
 
 		input_fpga_returned_prev_value <= input_fpga_returned;
 		if (!reset_n) begin
-			program_running = 0;
+			program_running <= 0;
 			idle <= 1;
 			pc <= 0;
 			sp <= 0;
@@ -216,17 +308,28 @@ module playground
 			stack_write <= 0;
 			heap_read_start <= 0;
 			heap_write_start <= 0;
+			heap_address_read <= 0;
 			heap_address <= 0;
+			heap_reset_start <= 0;
 			vga_draw_start <= 0;
 			count <= 0;
 			display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
+			unknown_command <= 0;
 		end else begin
-			if (idle) begin // idle state
+			if (program_error) begin
+				program_running = 0;
+			end else if (idle) begin // idle state
 				program_running = 0;
 				if (nike) begin
 					idle <= 0;
 					read_instruction_start <= 1;
 				end
+			/*end else if (interrupt_high && !interrupt_received) begin
+				interrupt_received <= 1;
+				save_registers <= cpu_registers;
+				save_pc <= pc;
+				pc <= interrupt_pc;
+				read_instruction_start <= 1;*/
 			end else if (read_instruction_start) begin // read instruction state
 				if (read_instruction_done) begin
 					read_instruction_start <= 0;
@@ -236,15 +339,15 @@ module playground
 					OP_LOAD: begin
 						if (stack_read_start) begin
 							if (stack_read_done) begin
-								cpu_registers_write = { stack_read[255:240], 240'bx };
-								cpu_registers_write_index = instr_b;
-								cpu_registers_write_enable = 1;
+								cpu_registers_write <= { stack_read[255:240], 240'bx };
+								cpu_registers_write_index <= instr_c;
+								cpu_registers_write_enable <= 1;
 								stack_read_start <= 0;
 								pc <= pc + 16'd1;
 								read_instruction_start <= 1;
 							end
 						end else begin
-							stack_address <= sp - instr_a;
+							stack_address <= sp - { instr_a, instr_b };
 							stack_words <= 16'd1;
 							stack_read_start <= 1;
 						end
@@ -258,15 +361,15 @@ module playground
 							end
 						end else begin
 							stack_write[255:240] <= cpu_registers_read_a;
-							stack_address <= sp - instr_b;
+							stack_address <= sp - { instr_b, instr_c };
 							stack_words <= 16'd1;
 							stack_write_start <= 1;
 						end
 					end
 					OP_LITERAL: begin
-						cpu_registers_write = { instr_a, 240'bx };
-						cpu_registers_write_index = instr_b;
-						cpu_registers_write_enable = 1;
+						cpu_registers_write <= { instr_a, instr_b, 240'bx };
+						cpu_registers_write_index <= instr_c;
+						cpu_registers_write_enable <= 1;
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
@@ -310,45 +413,45 @@ module playground
 						read_instruction_start <= 1;
 					end
 					OP_DIV: begin
-						cpu_registers_write = { do_math_div, 240'bx };
-						cpu_registers_write_index = instr_c;
-						cpu_registers_write_enable = 1;
-						pc <= pc + 16'd1;
-						read_instruction_start <= 1;
-					end
-					OP_CMP: begin
-						if (cpu_registers_read_a == cpu_registers_read_b) begin
-							cpu_registers_write = { 16'd0, 240'bx };
+						if(count == 6) begin
+							cpu_registers_write = { do_math_div, 240'bx };
 							cpu_registers_write_index = instr_c;
 							cpu_registers_write_enable = 1;
-							pc <= pc + 16'd1;
-							read_instruction_start <= 1;
-						end else if (cpu_registers_read_a < cpu_registers_read_b) begin
-							cpu_registers_write = { -16'd1, 240'bx };
-							cpu_registers_write_index = instr_c;
-							cpu_registers_write_enable = 1;
+							count <= 0;
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end else begin
-							cpu_registers_write = { 16'd1, 240'bx };
+							numer <= cpu_registers_read_a;
+							denom <= cpu_registers_read_b;
+							count <= count + 1;
+						end
+					end
+					OP_MOD: begin
+						if(count == 6	) begin
+							cpu_registers_write = { do_math_mod, 240'bx };
 							cpu_registers_write_index = instr_c;
 							cpu_registers_write_enable = 1;
+							count <= 0;
 							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
+						end else begin
+							numer <= cpu_registers_read_a;
+							denom <= cpu_registers_read_b;
+							count <= count + 1;
 						end
 					end
 					OP_BRANCH: begin
 						if (cpu_registers_read_a == 0) begin
-							pc <= pc + 16'd1;
+							pc <= pc + 16'd2;
 							read_instruction_start <= 1;
 						end else begin
-							pc <= pc + 16'd2;
+							pc <= pc + 16'd1;
 							read_instruction_start <= 1;
 						end
 					end
 					OP_JUMP: begin
 						if (instr_a == 0) begin
-							pc <= instr_b;
+							pc <= { instr_b, instr_c };
 							read_instruction_start <= 1;
 						end
 						else begin
@@ -357,7 +460,7 @@ module playground
 						end
 					end
 					OP_STACK: begin
-						sp <= sp + instr_a;
+						sp <= sp + { instr_a, instr_b };
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
@@ -366,7 +469,7 @@ module playground
 							if (stack_write_done) begin
 								stack_write_start <= 0;
 								pc <= pc + 16'd1;
-								sp <= sp + 16'd15;
+								sp <= sp + 16'd15;	
 								read_instruction_start <= 1;
 							end
 						end else begin
@@ -380,7 +483,7 @@ module playground
 						if (stack_read_start) begin
 							if (stack_read_done) begin
 								cpu_registers_write = stack_read;
-								cpu_registers_write_index = 16'd16;
+								cpu_registers_write_index = 8'd16;
 								cpu_registers_write_enable = 1;
 								stack_read_start <= 0;
 								pc <= pc + 16'd1;
@@ -394,53 +497,55 @@ module playground
 						end
 					end
 					OP_PRINTHEX: begin
-						input_fpga_waiting = 1;
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
 								vga_draw_start <= 0;
 								pc <= pc + 16'd1;
 								read_instruction_start <= 1;
-								input_fpga_waiting = 0;
 							end
 						end else begin
 							char_code <= { 4'b0, cpu_registers_read_a[15:12], 4'b0, cpu_registers_read_a[11:8], 
 								4'b0, cpu_registers_read_a[7:4], 4'b0, cpu_registers_read_a[3:0] };
-							//char_code[31:24] <= (cpu_registers_read_a / 1000) % 10;
-							//char_code[23:16] <= (cpu_registers_read_a / 100) % 10;
-							//char_code[15:8] <= (cpu_registers_read_a / 10) % 10;
-							//char_code[7:0] <= cpu_registers_read_a % 10;
 							draw_X <= cpu_registers_read_b[8:0];
 							draw_Y <= cpu_registers_read_c[7:0];
 							num_chars <= 2'd3;
 							vga_draw_start <= 1;
 						end								
 					end
-					OP_PRINTINT: begin
+					OP_PRINTDEC: begin
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
-								if (count == 4) begin
+								if (count == 25) begin
 									pc <= pc + 16'd1;
 									read_instruction_start <= 1;
 								end
 								vga_draw_start <= 0;
 							end
-						end else if (count == 0) begin
-							char_code[31:24] <= (cpu_registers_read_a / 10'd1000) % 4'd10;
+						end else begin
 							count <= count + 1;
-						end else if (count == 1) begin
-							char_code[23:16] <= (cpu_registers_read_a / 7'd100) % 4'd10;
-							count <= count + 1;
-						end else if (count == 2) begin
-							char_code[15:8] <= (cpu_registers_read_a / 4'd10) % 4'd10;
-							count <= count + 1;
-						end else if (count == 3) begin
-							char_code[7:0] <= (cpu_registers_read_a  % 4'd10);
-							draw_X <= cpu_registers_read_b[8:0];
-							draw_Y <= cpu_registers_read_c[7:0];
-							num_chars <= 2'd3;
-							vga_draw_start <= 1;
-							count <= count + 1;
-						end								
+							if (count == 0) begin
+								numer <= cpu_registers_read_a;
+								denom <= 16'd10;
+							end else if (count == 6) begin
+								char_code[7:0] <= do_math_mod;
+								numer <= do_math_div;
+								denom <= 16'd10;
+							end else if (count == 12) begin
+								char_code[15:8] <= do_math_mod;
+								numer <= do_math_div;
+								denom <= 16'd10;
+							end else if (count == 18) begin
+								char_code[23:16] <= do_math_mod;
+								numer <= do_math_div;
+								denom <= 16'd10;
+							end else if (count == 24) begin
+								char_code[31:24] <= do_math_mod;
+								draw_X <= cpu_registers_read_b[8:0];
+								draw_Y <= cpu_registers_read_c[7:0];
+								num_chars <= 2'd3;
+								vga_draw_start <= 1;
+							end
+						end
 					end
 					OP_DRAW: begin
 						if (vga_draw_start) begin
@@ -459,6 +564,13 @@ module playground
 					end
 					OP_KEYBOARD: begin
 						if (key_pressed) begin
+							//if (keycode != 8'd255)
+							//	if (keycode < 8'd36)
+							char_code <= { keycode, 24'b0 };
+							draw_X <= cpu_registers_read_a[8:0];
+							draw_Y <= cpu_registers_read_b[7:0];
+							num_chars <= 0;
+							vga_draw_start <= 1;
 							cpu_registers_write = { 8'b0, keycode, 240'bx };
 							cpu_registers_write_index = instr_c;
 							cpu_registers_write_enable = 1;
@@ -466,7 +578,7 @@ module playground
 							read_instruction_start <= 1;
 						end
 					end
-					OP_KEYINT: begin
+					OP_KEYHEX: begin
 						input_fpga_waiting = 1;
 						if (vga_draw_start) begin
 							if (vga_draw_done) begin
@@ -505,15 +617,49 @@ module playground
 							end
 						end
 					end
+					OP_KEYDEC: begin
+						input_fpga_waiting = 1'b1;
+						if (vga_draw_start) begin
+							if (vga_draw_done) begin
+								vga_draw_start <= 0;
+							end
+						end else if (key_pressed) begin
+							if (keycode != 8'd255) begin
+								if (keycode == 8'd98) begin
+									cpu_registers_write <= { key_int, 240'bx };
+									cpu_registers_write_index <= instr_c;
+									cpu_registers_write_enable <= 1'b1;
+									display_int <= { 8'd36, 8'd36, 8'd36, 8'd36 };
+									key_int <= 0;
+									count <= 0;
+									pc <= pc + 16'd1;
+									input_fpga_waiting = 0;
+									read_instruction_start <= 1'b1;
+								end else if (keycode < 8'd10)begin
+									if(count != 3'd4) begin
+										key_int <= (key_int * 4'd10) + keycode;
+										char_code <= { keycode, 24'b0 };
+										draw_X <= cpu_registers_read_a[8:0] + count;
+										draw_Y <= cpu_registers_read_b[7:0];
+										num_chars <= 1'b1;
+										vga_draw_start <= 1'b1;
+										count <= count + 1'b1;
+									end
+								end
+							end
+						end
+					end
 					OP_HEAP: begin
-						if (heap_write_enable) begin
-							heap_write_enable <= 0;
-							pc <= pc + 16'd1;
-							read_instruction_start <= 1;
+						if (heap_write_start) begin
+							if (heap_write_done) begin
+								heap_write_start <= 0;
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
+							end
 						end else begin
-							heap_write_values <= cpu_registers_read_a;
+							heap_write <= cpu_registers_read_a;
 							heap_address <= cpu_registers_read_b;
-							heap_write_enable <= 1;
+							heap_write_start <= 1;
 						end
 					end
 					OP_UNHEAP: begin
@@ -527,7 +673,7 @@ module playground
 								read_instruction_start <= 1;
 							end
 						end else begin
-							heap_address <= cpu_registers_read_a;
+							heap_address_read <= cpu_registers_read_a;
 							heap_read_start <= 1;
 						end
 					end
@@ -552,13 +698,94 @@ module playground
 						pc <= pc + 16'd1;
 						read_instruction_start <= 1;
 					end
+					OP_NOT: begin
+						cpu_registers_write <= { !(cpu_registers_read_a), 240'bx };
+						cpu_registers_write_index <= instr_b;
+						cpu_registers_write_enable <= 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_OR: begin
+						cpu_registers_write <= { (cpu_registers_read_a || cpu_registers_read_b), 240'bx };
+						cpu_registers_write_index <= instr_c;
+						cpu_registers_write_enable <= 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_AND: begin
+						cpu_registers_write <= { (cpu_registers_read_a && cpu_registers_read_b), 240'bx };
+						cpu_registers_write_index <= instr_c;
+						cpu_registers_write_enable <= 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_EQ: begin
+						if (cpu_registers_read_a == cpu_registers_read_b) begin
+							cpu_registers_write = { 16'd1, 240'bx };
+						end else begin
+							cpu_registers_write = { 16'd0, 240'bx };
+						end	
+						cpu_registers_write_index = instr_c;
+						cpu_registers_write_enable = 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_LT: begin
+						if (cpu_registers_read_a < cpu_registers_read_b) begin
+							cpu_registers_write = { 16'd1, 240'bx };
+						end else begin
+							cpu_registers_write = { 16'd0, 240'bx };
+						end
+						cpu_registers_write_index = instr_c;
+						cpu_registers_write_enable = 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_GT: begin
+						if (cpu_registers_read_a > cpu_registers_read_b) begin
+							cpu_registers_write = { 16'd1, 240'bx };
+						end else begin
+							cpu_registers_write = { 16'd0, 240'bx };
+						end
+						cpu_registers_write_index = instr_c;
+						cpu_registers_write_enable = 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_RAND: begin
+						cpu_registers_write <= { randnum, 240'bx };
+						cpu_registers_write_index <= instr_a;
+						cpu_registers_write_enable = 1;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_INTERRUPT: begin
+						//interrupt_code[instr_a] <= instr_b;
+						pc <= pc + 16'd1;
+						read_instruction_start <= 1;
+					end
+					OP_UNINTERRUPT: begin
+						pc <= save_pc;
+						//cpu_registers <= save_registers;
+						//interrupt_done <= 1;
+						read_instruction_start <= 1;
+					end
+					OP_HR_RESET: begin
+						if (heap_reset_start) begin
+							if (heap_write_done) begin
+								heap_reset_start <= 0;
+								pc <= pc + 16'd1;
+								read_instruction_start <= 1;
+							end
+						end
+						heap_reset_start <= 1;
+					end
 					OP_EOF: begin
-						program_done = 1;
-						program_running = 0;
+						program_done <= 1;
+						program_running <= 0;
 					end
 					default: begin
-						program_error = 1;
-						program_running = 0;
+						unknown_command <= 1;
 					end
 				endcase
 			end
@@ -577,7 +804,7 @@ module led_output_dffr(input clock, enable, reset_n, input [15:0] d, output reg 
 	end
 endmodule
 
-module instruction_ram_read(input clock, start, input [63:0] ram_data, output reg[63:0] q, output reg done);
+module instruction_ram_read(input clock, start, input [31:0] ram_data, output reg[31:0] q, output reg done);
 	reg count = 0;
 	always@(posedge clock) begin
 		if (start) begin
@@ -604,8 +831,9 @@ module stack_ram_read(input clock, start, input [15:0] ram_data, address, words,
 			if (!done) begin
 				real_address <= address + count;
 				count <= count + 1;
-				if (count == words + 2'd2)
+				if (count == words + 2'd2) begin
 					done <= 1;
+				end
 				else if (count > 1) begin
 					//q[255:240] <= ram_data;
 					k = (16'd255 - (count - 2) * 16);
@@ -623,15 +851,18 @@ module stack_ram_read(input clock, start, input [15:0] ram_data, address, words,
 	end
 endmodule
 
-module stack_ram_write(input clock, start, input [15:0] address, words, input [255:0] data, output reg[15:0] stuff_to_write, real_address, output reg done);
+module stack_ram_write(input clock, start, input [15:0] address, words, input [255:0] data, output reg[15:0] stuff_to_write, real_address, output reg done, write);
 	reg [4:0] count = 0;
 	integer i, k;
 	always@(posedge clock) begin
 		if (start) begin
 			if (!done) begin
-				if (count == words)
+				if (count == words) begin
 					done <= 1;
+					write <= 0;
+				end
 				else begin
+					write <= 1;
 					count <= count + 1;
 					real_address <= address + count;
 					//stuff_to_write <= data[255:240];
@@ -642,10 +873,53 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 				end
 			end
 		end else begin
+			write <= 0;
 			done <= 0;
 			count <= 0;
 			real_address <= 0;
 			stuff_to_write <= 0;
+		end
+	end
+endmodule
+//heap_ram_write u7(clock, heap_write_start, heap_write, heap_write_values, heap_address_real, heap_write_done);
+module heap_ram_write(input clock, start, resetn, heap_reset, input [15:0] address, input [15:0] data, output reg heap_write_enable, output reg[15:0] stuff_to_write, real_address, output reg done);
+	reg [15:0] count = 0;
+	reg resetting = 0;
+	always@(posedge clock) begin
+		if (resetting) begin
+			if (count == 16'd1023) begin
+				done <= 1'b1;
+				resetting <= 0;
+				count <= 0;
+				heap_write_enable <= 0;
+			end else begin
+				heap_write_enable <= 1'b1;
+				stuff_to_write <= 0;
+				real_address <= count;
+				count <= count + 1'b1;	
+			end
+		end else if (!resetn || heap_reset) begin
+			resetting <= 1'b1;
+		end else if (start) begin
+			if (!done) begin
+				if (count == 1'b1) begin
+					done <= 1'b1;
+					heap_write_enable <= 0;
+					count <= 0;
+				end
+				else begin
+					heap_write_enable <= 1;
+					stuff_to_write <= data;
+					real_address <= address;
+					count <= count + 1'b1;
+				end
+			end
+		end else begin
+			done <= 0;
+			count <= 0;
+			real_address <= 0;
+			stuff_to_write <= 0;
+			heap_write_enable <= 0;
 		end
 	end
 endmodule
@@ -720,6 +994,8 @@ module cpu_registers_write_mux(input clock, enable, input [4:0] s, input [255:0]
 	end
 endmodule
 
+//module interrupt_handler (input clock, resetn,  );
+
 module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:0] Y, input [31:0] char_code, input [1:0] num_chars, output reg draw_en, done, colour, output reg [8:0] x, output reg [7:0] y);
 	wire [0:47]  pixels;
 	reg [7:0] chars;
@@ -737,8 +1013,8 @@ module vga_draw_character (input clock, start, reset_n, input [8:0] X, input [7:
    always@(posedge clock) begin
 		if (resetting) begin
 			counterX <= counterX + 1'b1;
-			if(counterX == 9'd319) begin
-				if(counterY == 9'd239) begin
+			if(counterX == 9'd313) begin
+				if(counterY == 9'd223) begin
 					resetting <= 0;
 					counterX <= 0;
 					counterY <= 0;
@@ -847,3 +1123,26 @@ module char_to_pixels (input [7:0] code, output reg [0:47] pixels);
 endmodule // char_to_pixels
 	
 
+module sevsegDecoder(input[3:0] in, output reg[6:0] HEX);
+
+   always @(in)
+     case (in)
+       4'h0: HEX = 7'b1000000;
+       4'h1: HEX = 7'b1111001;
+       4'h2: HEX = 7'b0100100;
+       4'h3: HEX = 7'b0110000;
+       4'h4: HEX = 7'b0011001;
+       4'h5: HEX = 7'b0010010;
+       4'h6: HEX = 7'b0000010;
+       4'h7: HEX = 7'b1111000;
+       4'h8: HEX = 7'b0000000;
+       4'h9: HEX = 7'b0011000;
+       4'hA: HEX = 7'b0001000;
+       4'hB: HEX = 7'b0000011;
+       4'hC: HEX = 7'b1000110;
+       4'hD: HEX = 7'b0100001;
+       4'hE: HEX = 7'b0000110;
+       4'hF: HEX = 7'b0001110;
+       default: HEX = 7'b0110110;
+     endcase
+endmodule
