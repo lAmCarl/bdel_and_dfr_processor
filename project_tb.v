@@ -53,23 +53,30 @@ module project_tb(PS2_CLK, PS2_DAT); // no I/O ports, this is a testbench file
 		#20
 		KEY = 3'b111;
 		
-		#1000
-		key_pressed = 1;
-		keycode = 8'd39;
+		//#1000
+		//key_pressed = 1;
+		//keycode = 8'd39;
 		
-		#20
-		key_pressed = 0;
+		//#20
+		//key_pressed = 0;
 		 
-		#9000
-		key_pressed = 1;
-		keycode = 8'h1B;
+		#5000000
+		KEY = 3'b110;
 		
 		#20
-		key_pressed = 0;
+		KEY = 3'b111;
+		
+		#2500000
+		KEY = 3'b101;
+		
+		
+		
+		#20
+		KEY = 3'b111;
 		
 
 		
-		#10000// advance 25 cycles
+		#100000000// advance 25 cycles
 
 		$stop;  // suspend the simulation, but do not $finish
 			    // $finish will try to close Modelsim, and that's annoying

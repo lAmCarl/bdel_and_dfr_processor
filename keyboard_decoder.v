@@ -1,15 +1,8 @@
-module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode
-	//,received_data
-	//,received_data_en
-);
+module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode);
 	input CLOCK_50;
 	inout PS2_CLK, PS2_DAT;
 	output reg key_pressed = 0;
 	output reg [7:0] keycode = 0;
-	
-	//input[7:0] received_data;
-	//input received_data_en;
-	
 	
 	wire[7:0] received_data;
 	wire received_data_en;
@@ -61,7 +54,7 @@ module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode
 				8'h3D: keycode <= 8'd7;
 				8'h3E: keycode <= 8'd8;
 				8'h46: keycode <= 8'd9;
-				8'h1C: keycode <= 8'd10;
+				8'h1C: keycode <= 8'd10; // A
 				8'h32: keycode <= 8'd11;
 				8'h21: keycode <= 8'd12;
 				8'h23: keycode <= 8'd13;
@@ -78,7 +71,7 @@ module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode
 				8'h44: keycode <= 8'd24;
 				8'h4D: keycode <= 8'd25;
 				8'h15: keycode <= 8'd26;
-				8'h2D: keycode <= 8'd27; // R
+				8'h2D: keycode <= 8'd27;
 				8'h1B: keycode <= 8'd28; // S
 				8'h2C: keycode <= 8'd29;
 				8'h3C: keycode <= 8'd30;
@@ -86,7 +79,7 @@ module keyboard_decoder(CLOCK_50, PS2_CLK, PS2_DAT, key_pressed, keycode
 				8'h1D: keycode <= 8'd32;
 				8'h22: keycode <= 8'd33;
 				8'h35: keycode <= 8'd34;
-				8'h1A: keycode <= 8'd35;
+				8'h1A: keycode <= 8'd35; // Z
 				8'h29: keycode <= 8'd36; // space
 				8'h66: keycode <= 8'd37; // delete
 				8'h49: keycode <= 8'd38; // period

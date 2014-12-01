@@ -9,26 +9,25 @@ module playground
 		output	[9:0] VGA_R, VGA_G, VGA_B,
 		output[6:0] HEX0, HEX1, HEX2, HEX3,
 		inout		PS2_CLK, PS2_DAT
-		,input key_pressed,
-		input [7:0] keycode	
+
 		);
 		
 	assign LEDG[7:3] = { 5{ 1'd0 } };
-
+	reg[3:0] something = 0;
 	reg signed [15:0] pc = 0, sp = 0, save_pc;
 	reg read_instruction_start = 0;
 	wire read_instruction_done;
 	reg idle = 1;
 		
 
-	reg wasreset = 1;
+	reg keyreset = 1;
 	always@(posedge CLOCK_50) begin
 		if (key_pressed) begin
 			if(keycode == 8'd39)
-				wasreset <= 0;
-			else wasreset <= 1;
+				keyreset <= 0;
+			else keyreset <= 1;
 		end 
-		else wasreset <= 1;
+		else keyreset <= 1;
 	end
 	
 	
@@ -36,21 +35,21 @@ module playground
 	wire nike;
 	assign nike = (~KEY[1] || (key_pressed && keycode == 8'd28));
 	assign clock = CLOCK_50;
-	assign reset_n = (KEY[0] && (wasreset));
+	assign reset_n = (KEY[0] && (keyreset));
 	
 	wire [31:0] instruction;
 	wire signed [7:0] opcode, instr_a, instr_b, instr_c;
 	assign { opcode, instr_a, instr_b, instr_c } = instruction;
 	reg unknown_command = 0;
 	reg program_running = 0;
-	reg heap_segfault = 0;
-	reg stack_read_start = 0, stack_write_start = 0, segfault1 = 0, segfault2 = 0;
-	wire program_error = segfault1 | segfault2 | unknown_command | heap_segfault;
+	reg segfault = 0, heap_segfault = 0;
+	reg stack_read_start = 0, stack_write_start = 0;
+	wire program_error = segfault | unknown_command | heap_segfault;
 	reg program_done;
 
 	assign LEDG[0] = program_running;
 	assign LEDG[1] = program_done;
-	assign LEDR[1] = segfault1 | segfault2;
+	assign LEDR[1] = segfault;
 	assign LEDR[2] = heap_segfault;
 	assign LEDR[0] = unknown_command;
 	assign LEDR[17] = program_error;
@@ -72,7 +71,7 @@ module playground
 		, OP_STACK = 8'd13
 		, OP_SUPERMANDIVE = 8'd14
 		, OP_GETUP = 8'd15
-		, OP_PRINTDEC = 8'd16 // opcodes including and after 16 should later be system functions
+		, OP_PRINTDEC = 8'd16
 		, OP_DRAW = 8'd17 // <char_code> <x> <y>
 		, OP_KEYBOARD = 8'd18
 		, OP_HEAP = 8'd19
@@ -93,7 +92,8 @@ module playground
 		, OP_INTERRUPT = 8'd34
 		, OP_UNINTERRUPT = 8'd35
 		, OP_HR_RESET = 8'd36
-		, OP_KEY_COUNT = 8'd37;
+		, OP_KEY_COUNT = 8'd37
+		, OP_UNKEY = 8'd38;
 
 	// Output LED
 	// Use: led_output_in, led_output_write_enable
@@ -119,7 +119,7 @@ module playground
 	reg vga_draw_start = 0;
 	wire vga_draw_done;
 	vga_draw_character u1(clock, vga_draw_start, reset_n, draw_X, draw_Y, char_code, num_chars, draw_en, vga_draw_done, draw_colour, draw_x, draw_y);
-	/*vga_adapter VGA(
+	vga_adapter VGA(
 		.resetn(reset_n),
 		.clock(CLOCK_50),
 		.colour(draw_colour),
@@ -139,8 +139,8 @@ module playground
 	defparam VGA.MONOCHROME = "TRUE";
 	defparam VGA.BITS_PER_COLOUR_CHANNEL = 1;
 	defparam VGA.BACKGROUND_IMAGE = "background.mif";
-	*/
-	//module interrupt_handler (input clock, resetn, interrupt_done, interrupt_received, timer_interrupt, keyboard_interrupt, output reg interrupt_high, output reg [1:0] interrupt_code);
+	
+
 	//Interrupt
 	reg keyboard_interrupt = 0, timer_interrupt = 0, interrupt_received = 0, interrupt_done = 0;
 	wire[1:0] interrupt_code;
@@ -155,26 +155,24 @@ module playground
 	interrupt_handler ih(clock, reset_n, interrupt_done, interrupt_received, timer_interrupt, keyboard_interrupt, interrupt_high, interrupt_code);
 	
 	//Timer_interrupt
-	reg[32:0] counter = 33'd50000;
 	wire pulse;
-	timer timer1(clock, reset_n, program_running, counter, pulse);
-	always@(posedge clock)begin
-		timer_interrupt <= 0;
+	myTimer timer1(CLOCK_50, reset_n, LEDR[3], pulse);
+	always@(*)begin
+		timer_interrupt = 0;
 		if (pulse) begin
 			if (interrupt_jumpcode[2'd0] != 0) begin
-				timer_interrupt <= 1'b1;
+				timer_interrupt = 1'b1;
 			end
 		end
 	end
 	
 	// Input keyboard
-	//wire key_pressed;
+	wire key_pressed;
 	reg[15:0] keycount = 0;
-	//wire [7:0] keycode;
+	wire [7:0] keycode;
 	reg [15:0] key_int;
 
-	//keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
-	//keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode, received_data, received_data_en);
+	keyboard_decoder keyboard(clock, PS2_CLK, PS2_DAT, key_pressed, keycode);
 	
 	always@(posedge clock)begin
 		keyboard_interrupt <= 0;
@@ -200,7 +198,6 @@ module playground
 	random rand1(randnum, clock);
 
 	// CPU registers
-	// Use: cpu_registers_<read>_<a|b|c>, cpu_registers_write, cpu_registers_write_enable, cpu_registers_write_index
 	wire [255:0] cpu_registers;
 	reg [255:0] save_registers;
 	reg cpu_registers_write_enable;
@@ -215,7 +212,6 @@ module playground
 	cpu_registers_write_mux u5(clock, cpu_registers_write_enable, cpu_registers_write_index[4:0], cpu_registers_write, cpu_registers);
 	
 	// Stack
-	// Use: stack_address, stack_words, stack_read, stack_write
 	wire [255:0] stack_read;
 	reg [255:0] stack_write = 0;
 	reg [15:0] stack_address = 0, stack_words = 0;
@@ -225,25 +221,24 @@ module playground
 	wire stack_read_done, stack_write_done, stack_write_go;
 	stack_ram_read u8(clock, stack_read_start, stack_read_values, stack_address, stack_words, stack_read, read_address, stack_read_done);
 	stack_ram_write u9(clock, stack_write_start, stack_address, stack_words, stack_write, stack_write_values, write_address, stack_write_done, stack_write_go);
+	
 	always@(*) begin
-		segfault1 = 0;
-		segfault2 = 0;
+		segfault = 0;
 		stack_address_real = read_address;
 		if(stack_write_start) begin
 			if (write_address > 16'd2047) begin
-				segfault1 = 1;
+				segfault = 1;
 			end else begin
 				stack_address_real = write_address;
 			end
 		end else if (stack_read_start) begin
 			if ((read_address > 16'd3) && ((read_address - 16'd2) > 16'd2047)) begin
-				segfault2 = 1;
+				segfault = 1;
 			end else begin
 				stack_address_real = read_address;
 			end
 		end else begin
-			segfault1 = 0;
-			segfault2 = 0;
+			segfault = 0;
 			stack_address_real = read_address;
 		end
 	end
@@ -262,7 +257,7 @@ module playground
 	reg heap_write_start = 0, heap_reset_start = 0;
 	reg [15:0] heap_write = 0;
 	wire [15:0] heap_read, heap_read_values, heap_write_values, heap_address_write;
-	//module heap_ram_write(input clock, start, resetn, heap_reset, input [15:0] address, input [15:0] data, output reg heap_write_enable, output reg[15:0] stuff_to_write, real_address, output reg done);
+
 	heap_ram_read u6(clock, heap_read_start, heap_read, heap_read_values, heap_read_done);
 	heap_ram_write u7(clock, heap_write_start, reset_n, heap_reset_start, heap_address, heap_write, heap_write_enable, heap_write_values, heap_address_write, heap_write_done);
 	heap_ram u13(
@@ -305,7 +300,6 @@ module playground
 	assign do_math_add = cpu_registers_read_a + cpu_registers_read_b;
 	assign do_math_sub = cpu_registers_read_a - cpu_registers_read_b;
 	assign do_math_mul = cpu_registers_read_a * cpu_registers_read_b;
-	//assign do_math_div = cpu_registers_read_a / cpu_registers_read_b;
 	assign do_math_inc = cpu_registers_read_a + 16'b1;
 	assign do_math_dec = cpu_registers_read_a - 16'b1;
 	
@@ -378,9 +372,9 @@ module playground
 						save_registers <= cpu_registers;
 						save_pc <= pc;
 						pc <= interrupt_jumpcode[interrupt_code];
-						count <= 1'd1;
+						count <= 5'd25;
 				end else if (read_instruction_done) begin
-					if (count == 1'd1)
+					if (count == 5'd25)
 						count <= 0;
 					else
 						read_instruction_start <= 0;
@@ -619,7 +613,6 @@ module playground
 					OP_KEYBOARD: begin
 						if (key_pressed) begin
 							if (keycode != 8'd255) begin
-								//	if (keycode < 8'd36)
 								char_code <= { keycode, 32'b0 };
 								if (cpu_registers_read_a != -1) begin
 									draw_X <= cpu_registers_read_a[8:0];
@@ -747,8 +740,9 @@ module playground
 										keycount <= count + 1'b1;
 									end
 								end else if (keycode == 8'd37) begin
-									if (count > 0) begin
-										key_int <= key_int / 5'd10;
+									if (something == 4'd7) begin
+										key_int <= do_math_div;
+										something <= 0;
 										char_code <= {8'd36, 32'd0};
 										draw_X <= cpu_registers_read_a[8:0] + count - 1'b1;
 										draw_Y <= cpu_registers_read_b[7:0];
@@ -756,6 +750,10 @@ module playground
 										vga_draw_start <= 1'b1;
 										count <= count - 1'b1;
 										keycount <= count - 1'b1;
+									end else if (count > 0) begin
+										numer <= key_int;
+										denom <= 5'd10;
+										something <= something + 1'b1;
 									end
 								end
 							end
@@ -902,6 +900,13 @@ module playground
 						pc <= pc + 1'b1;
 						read_instruction_start <= 1'b1;
 					end
+					OP_UNKEY: begin
+						cpu_registers_write <= { 8'b0, keycode, 240'bx };
+						cpu_registers_write_index <= instr_a;
+						cpu_registers_write_enable <= 1'b1;
+						pc <= pc + 1'b1;
+						read_instruction_start <= 1'b1;
+					end
 					OP_EOF: begin
 						program_done <= 1;
 						program_running <= 0;
@@ -959,7 +964,6 @@ module stack_ram_read(input clock, start, input [15:0] ram_data, address, words,
 					done <= 1;
 				end
 				else if (count > 1) begin
-					//q[255:240] <= ram_data;
 					k = (16'd255 - (count - 2) * 16);
 					for (i = 0; i < 16; i = i + 1) begin
 						q[k - i] = ram_data[15 - i];
@@ -989,7 +993,6 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 					write <= 1;
 					count <= count + 1;
 					real_address <= address + count;
-					//stuff_to_write <= data[255:240];
 					k = (16'd255 - (count * 16));
 					for (i = 0; i < 16; i = i + 1) begin
 						stuff_to_write[15 - i] <= data [k - i];
@@ -1005,7 +1008,8 @@ module stack_ram_write(input clock, start, input [15:0] address, words, input [2
 		end
 	end
 endmodule
-//heap_ram_write u7(clock, heap_write_start, heap_write, heap_write_values, heap_address_real, heap_write_done);
+
+
 module heap_ram_write(input clock, start, resetn, heap_reset, input [15:0] address, input [15:0] data, output reg heap_write_enable, output reg[15:0] stuff_to_write, real_address, output reg done);
 	reg [15:0] count = 0;
 	reg resetting = 0;
@@ -1154,20 +1158,23 @@ module interrupt_handler (input clock, resetn, interrupt_done, interrupt_receive
 	end
 endmodule
 
-module timer (input clock, reset_n, enable, input [32:0]counter, output reg pulse);
+module myTimer (input clock, input [32:0]counter, output reg LEDR, output reg pulse);
 	reg[32:0] count = 0;
-	always@(posedge clock)
-		if(!reset_n) begin
+	always@(posedge clock) begin
+		if (!reset_n) begin
 			count <= 0;
 			pulse <= 0;
-			
-		end else if (count == counter) begin
+			LEDR <= 0;
+		end else if (count == 33'd50_000_000) begin
 			pulse <= 1'b1;
+			LEDR <= ~LEDR;
 			count <= 0;
-		end else if (enable) begin
+		end else begin
 			count <= count + 1'b1;
 			pulse <= 0;
 		end
+		
+	end
 endmodule
 			
 
